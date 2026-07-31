@@ -173,31 +173,21 @@ export function applyStoredAppearance(): void {
 }
 
 export function reinforceEditorAppearance(): void {
-  ensureRuntimeAppearanceStyle();
+  /*
+   Font styling is enforced entirely by the injected stylesheet
+   (ensureRuntimeAppearanceStyle) plus index.css, which already apply
+   font-family !important to every editor selector.
 
-  document
-    .querySelectorAll<HTMLElement>(
-      [
-        "html",
-        "body",
-        "#root",
-        ".vellix-editor-shell",
-        ".vellix-editor-page",
-        ".bn-container",
-        ".bn-default-styles",
-        ".bn-editor",
-        ".ProseMirror",
-        ".bn-block",
-        ".bn-block-content",
-        ".bn-inline-content",
-        "[data-inline-content]",
-      ].join(","),
-    )
-    .forEach((element) => {
-      element.style.setProperty(
-        "font-family",
-        "var(--vellix-font-family)",
-        "important",
-      );
-    });
+   We must NOT write inline styles onto the editor's block nodes here. Those
+   nodes are owned by ProseMirror, which watches them with its own
+   MutationObserver and redraws to reconcile any foreign mutation. That redraw
+   is itself a DOM change, so it re-triggers the MutationObserver in App, which
+   schedules another reinforcement, which writes the inline styles again — an
+   endless ~60fps loop that continuously tears down and rebuilds block nodes
+   until the web process is killed and the page reloads empty.
+
+   Ensuring the stylesheet exists is idempotent and touches nothing that
+   ProseMirror manages, so it cannot start that loop.
+  */
+  ensureRuntimeAppearanceStyle();
 }
