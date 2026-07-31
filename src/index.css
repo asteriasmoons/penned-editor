@@ -1,4 +1,6 @@
 :root {
+  color: #f7f7f7;
+  background: transparent;
   font-family:
     ui-rounded,
     -apple-system-rounded,
@@ -9,18 +11,24 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-
-  color: #f7f7f7;
-  background: #000000;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 
-  --vellix-background: #000000;
-  --vellix-page-background: #000000;
+  --vellix-background: transparent;
+  --vellix-page-background: transparent;
   --vellix-primary-text: #f7f7f7;
-  --vellix-secondary-text: #a3a3a3;
-  --vellix-editor-width: 780px;
+  --vellix-secondary-text: #9b9b9f;
+  --vellix-font-family:
+    ui-rounded,
+    -apple-system-rounded,
+    "SF Pro Rounded",
+    "SF Pro Display",
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  --vellix-selection-fill: #0d5668;
+  --vellix-selection-dot: #2ecbff;
 }
 
 * {
@@ -32,20 +40,16 @@ body,
 #root {
   width: 100%;
   min-width: 100%;
-  min-height: 100%;
+  height: auto !important;
+  min-height: 0 !important;
   margin: 0;
   padding: 0;
-}
-
-html {
-  background: var(--vellix-background);
+  background: transparent !important;
+  overflow: visible !important;
 }
 
 body {
-  min-height: 100vh;
-  background: var(--vellix-background);
   color: var(--vellix-primary-text);
-  overflow-x: hidden;
   overscroll-behavior: none;
 }
 
@@ -56,144 +60,380 @@ select {
   font: inherit;
 }
 
-.vellix-editor-shell {
-  width: 100%;
-  min-height: 100vh;
-  background: var(--vellix-background);
-}
-
+.vellix-editor-shell,
 .vellix-editor-page {
-  width: min(
-    100%,
-    var(--vellix-editor-width)
-  );
-
-  min-height: 100vh;
-  margin: 0 auto;
-  padding:
-    56px
-    32px
-    180px;
+  width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  color: var(--vellix-primary-text);
+  font-family: var(--vellix-font-family) !important;
+  overflow: visible !important;
 }
 
-/*
- BlockNote editor surface
-*/
+.bn-container,
+.bn-default-styles,
+.bn-editor,
+.ProseMirror,
+.bn-block,
+.bn-block-content,
+.bn-inline-content,
+[data-inline-content],
+.bn-default-styles *,
+.ProseMirror * {
+  font-family: var(--vellix-font-family) !important;
+}
 
-.bn-container {
-  color: var(--vellix-primary-text);
-  background: transparent;
+.bn-container,
+.bn-default-styles,
+.bn-editor,
+.ProseMirror {
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--vellix-primary-text) !important;
+  overflow: visible !important;
 }
 
 .bn-editor {
-  min-height: calc(100vh - 236px);
-  padding: 0;
-  background: transparent;
-  color: var(--vellix-primary-text);
+  font-size: 16px !important;
+  line-height: 1.52 !important;
+  padding-bottom: 1px !important;
+  caret-color: var(--vellix-primary-text);
 }
 
-/*
- Text and blocks
-*/
+.bn-default-styles {
+  font-size: 16px !important;
+}
+
+.bn-block-outer,
+.bn-block,
+.bn-block-content {
+  transition: none !important;
+}
+
+.bn-block-outer {
+  position: relative;
+}
+
+.bn-block {
+  position: relative;
+  isolation: isolate;
+}
 
 .bn-block-content {
-  color: var(--vellix-primary-text);
+  padding: 2px 0 !important;
+  color: var(--vellix-primary-text) !important;
 }
 
-.bn-inline-content {
-  color: inherit;
+.bn-inline-content,
+[data-inline-content] {
+  color: inherit !important;
 }
 
 .bn-block-content[data-content-type="paragraph"] {
-  line-height: 1.65;
+  line-height: 1.52 !important;
 }
 
 .bn-block-content[data-content-type="heading"] {
-  letter-spacing: -0.025em;
+  font-family: var(--vellix-font-family) !important;
+  font-size: 1.36em !important;
+  font-weight: 800;
+  letter-spacing: 0 !important;
+  line-height: 1.24 !important;
 }
 
-/*
- Placeholder text
-*/
+@media (max-width: 700px) {
+  .bn-editor,
+  .bn-default-styles {
+    font-size: 15.5px !important;
+  }
 
-.bn-inline-content:has(
-    > .ProseMirror-trailingBreak:only-child
-  )::before {
-  color: var(--vellix-secondary-text);
+  .bn-block-content {
+    padding: 1.5px 0 !important;
+  }
+
+  .bn-block-content[data-content-type="heading"] {
+    font-size: 1.3em !important;
+  }
 }
-
-/*
- Selection
-*/
 
 ::selection {
   background: rgb(128 0 254 / 35%);
 }
 
-/*
- Links
-*/
-
 .bn-editor a {
-  color: #00dbff;
+  color: #8fe9ff;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
-/*
- Mobile and narrow windows
-*/
-
-@media (max-width: 700px) {
-  .vellix-editor-page {
-    padding:
-      28px
-      18px
-      140px;
-  }
+.bn-inline-content:has(> .ProseMirror-trailingBreak:only-child)::before {
+  color: var(--vellix-secondary-text);
+  font-size: 16px !important;
 }
-/* ==========================================================================
-   Carried over from the shipped VellixEditor bundle (was hand-edited directly
-   in compiled CSS; reconciled back into source on 2026-07-30). These layer on
-   top of the base rules above: appearance vars, block styling, height
-   neutralizers, and the swipe-to-select selection UI.
-   ========================================================================== */
 
-:root{--vellix-font-family:ui-rounded,-apple-system-rounded,'SF Pro Rounded','SF Pro Display',Inter,-apple-system,BlinkMacSystemFont,sans-serif;--vellix-page-background:#202020}
-.vellix-editor-shell{background:transparent!important}
-.vellix-editor-page{background:var(--vellix-page-background)!important;border-radius:0;color:var(--vellix-primary-text)!important;font-family:var(--vellix-font-family)!important;min-height:100%;padding:0!important;width:100%!important}
-.bn-container,.bn-default-styles,.bn-editor,.ProseMirror,.bn-block,.bn-block-content,.bn-inline-content,[data-inline-content],.bn-default-styles *,.ProseMirror *{font-family:var(--vellix-font-family)!important}
-.bn-editor{min-height:520px!important;color:var(--vellix-primary-text)!important;font-size:18px;line-height:1.68}
-.bn-block-content,.bn-inline-content{color:var(--vellix-primary-text)!important}
-.bn-block-content[data-content-type=heading]{font-family:var(--vellix-font-family)!important;font-weight:800;letter-spacing:0}
-.bn-block-content[data-content-type=quote]{border:1px solid #ffffff1f;background:#ffffff12;border-radius:18px;margin:14px 0;padding:16px 18px!important}
-.bn-block-content[data-content-type=quote] blockquote{border-left:0;color:var(--vellix-primary-text);margin:0;padding-left:0}
-.bn-block-content[data-content-type=callout]{padding:6px 0!important}
-.vellix-callout{--vellix-callout-color:#fff;align-items:flex-start;background:color-mix(in srgb,var(--vellix-callout-color) 16%,transparent);border:1px solid color-mix(in srgb,var(--vellix-callout-color) 30%,transparent);border-radius:18px;box-shadow:inset 0 1px 0 #ffffff18,0 16px 36px #00000024;display:flex;gap:12px;margin:12px 0;padding:14px 16px}
-.vellix-callout-icon{align-items:center;appearance:none;-webkit-appearance:none;background:color-mix(in srgb,var(--vellix-callout-color) 22%,transparent);border:1px solid color-mix(in srgb,var(--vellix-callout-color) 38%,transparent);border-radius:14px;color:#fff!important;display:flex;flex:0 0 auto;font:700 20px/1 var(--vellix-font-family);height:38px;justify-content:center;margin:1px 0 0;padding:0;width:38px}
-.vellix-callout-text{color:var(--vellix-primary-text);flex:1;min-width:0;padding-top:5px}
-.vellix-callout-text:empty:before{color:var(--vellix-secondary-text);content:"Callout"}
-.bn-block-content[data-content-type=pageBreak]>div{height:54px!important;border:1px solid #ffffff14!important;border-top:1px solid #ffffff14!important;border-radius:28px;background:#20202080;box-shadow:0 12px 28px #00000029;margin:20px 0!important}
-.bn-block-content[data-content-type=divider] hr{border:0!important;border-top:1px solid #ffffff1a!important;margin:18px 0!important}
-.bn-block-outer:has(.bn-inline-content:only-child){min-height:20px}
-.bn-inline-content{caret-color:var(--vellix-primary-text)}
-html,body,#root,.vellix-editor-shell,.vellix-editor-page{background:transparent!important}
-.vellix-editor-shell{min-height:auto!important}
-.vellix-editor-page{min-height:auto!important;width:100%!important;margin:0!important;padding:0!important;overflow:visible!important}
-.bn-container,.bn-editor,.ProseMirror{background:transparent!important}
-.bn-editor{min-height:220px!important;color:var(--vellix-primary-text)!important;font-size:16px!important;line-height:1.55!important;padding:0!important}
-.bn-default-styles{font-size:16px!important}
-.bn-block-content{padding:2px 0!important}
-.bn-inline-content:has(>.ProseMirror-trailingBreak:only-child):before{font-size:16px!important}
-.bn-block-content[data-content-type=heading]{letter-spacing:0!important}
-@media (max-width:700px){.bn-editor,.bn-default-styles{font-size:16px!important}.bn-block-content[data-content-type=heading]{font-size:1.45em!important}.bn-block-content[data-content-type=paragraph]{line-height:1.5!important}.bn-block-content[data-content-type=pageBreak]>div{height:32px!important;margin:12px 0!important}}
-html,body,#root{height:auto!important;min-height:0!important;overflow:visible!important}
-.vellix-editor-shell,.vellix-editor-page{height:auto!important;min-height:0!important;overflow:visible!important}
-.bn-container,.bn-editor,.ProseMirror{height:auto!important;min-height:0!important;overflow:visible!important}
-.bn-editor{padding-bottom:8px!important}
-.vellix-editor-page .bn-editor{min-height:0!important;padding-bottom:2px!important}
+.vellix-has-user-content .bn-trailing-block,
+.vellix-has-user-content
+  .bn-block-outer:has(.bn-block-content .ProseMirror-trailingBreak:only-child) {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 
-@media (max-width:700px){.bn-editor,.bn-default-styles{font-size:15px!important}.bn-block-content{padding:1px 0!important}.bn-block-content[data-content-type=heading]{font-size:1.32em!important}.bn-block-content[data-content-type=paragraph]{line-height:1.46!important}}
+.vellix-has-user-content
+  .bn-block-content:has(.ProseMirror-trailingBreak:only-child)::after {
+  display: none !important;
+  content: none !important;
+}
+
+html:not(.vellix-selection-mode) .bn-editor,
+html:not(.vellix-selection-mode) .bn-block-content,
+html:not(.vellix-selection-mode) .bn-inline-content,
+html:not(.vellix-selection-mode) [data-inline-content] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  touch-action: pan-y !important;
+}
+
+.bn-editor,
+.bn-block-outer,
+.bn-block,
+.bn-block-content,
+.bn-inline-content {
+  touch-action: pan-y;
+}
+
+/* Quote is intentionally simple: a left rule only, no callout box. */
+.bn-block-content[data-content-type="quote"] {
+  position: relative;
+  margin: 10px 0 10px 2px !important;
+  padding: 4px 0 4px 16px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.bn-block-content[data-content-type="quote"]::before {
+  position: absolute;
+  inset: 3px auto 3px 0;
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vellix-primary-text) 62%, transparent);
+  content: "";
+}
+
+.bn-block-content[data-content-type="quote"] blockquote {
+  margin: 0;
+  padding-left: 0;
+  color: var(--vellix-primary-text);
+  font-style: normal;
+  border-left: 0 !important;
+}
+
+/* Callout keeps the frosty translucent card and exposes its icon as a button. */
+.bn-block-content[data-content-type="callout"] {
+  padding: 6px 0 !important;
+}
+
+.vellix-callout {
+  --vellix-callout-color: #ffffff;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--vellix-callout-color) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vellix-callout-color) 30%, transparent);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 #ffffff18,
+    0 16px 36px #00000024;
+}
+
+.vellix-callout-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin: 1px 0 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  color: #fff !important;
+  font: 800 18px/1 var(--vellix-font-family);
+  background: color-mix(in srgb, var(--vellix-callout-color) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vellix-callout-color) 38%, transparent);
+  border-radius: 14px;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.vellix-callout-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 5px;
+  color: var(--vellix-primary-text);
+}
+
+.vellix-callout-text:empty::before {
+  color: var(--vellix-secondary-text);
+  content: "Callout";
+}
+
+/* Checklist should look like Craft-style hollow round circles, not squares. */
+.bn-block-content[data-content-type="checkListItem"] > div:has(> input) {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+.bn-block-content[data-content-type="checkListItem"] > div > input {
+  width: 19px !important;
+  min-width: 19px !important;
+  height: 19px !important;
+  margin: 0 10px 0 3px !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  cursor: pointer;
+  background: transparent !important;
+  border: 2px solid color-mix(in srgb, var(--vellix-primary-text) 42%, transparent) !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+}
+
+.bn-block-content[data-content-type="checkListItem"] > div > input:checked {
+  background: var(--vellix-selection-dot) !important;
+  border-color: var(--vellix-selection-dot) !important;
+  box-shadow: inset 0 0 0 4px #050606 !important;
+}
+
+.bn-block-content[data-content-type="checkListItem"] > div > input:focus-visible {
+  outline: 2px solid rgb(46 203 255 / 60%) !important;
+  outline-offset: 2px !important;
+}
+
+/* Toggle rows use Vellix chevron language: chevright closed, chevdown open. */
+.bn-block-content[data-content-type="toggleListItem"] {
+  padding: 5px 0 !important;
+}
+
+.bn-toggle-wrapper {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.bn-toggle-button {
+  position: relative;
+  flex: 0 0 26px;
+  width: 26px !important;
+  height: 26px !important;
+  margin: 0;
+  padding: 0 !important;
+  color: #fff !important;
+  background: rgb(255 255 255 / 7%) !important;
+  border: 1px solid rgb(255 255 255 / 12%) !important;
+  border-radius: 50% !important;
+  transform: none !important;
+}
+
+.bn-toggle-button > svg {
+  display: none !important;
+}
+
+.bn-toggle-button::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translate(-62%, -50%) rotate(-45deg);
+  content: "";
+}
+
+.bn-toggle-wrapper[data-show-children="true"] .bn-toggle-button::before {
+  transform: translate(-50%, -62%) rotate(45deg);
+}
+
+html.vellix-has-chevright-icon
+  .bn-toggle-wrapper[data-show-children="false"]
+  .bn-toggle-button::before,
+html.vellix-has-chevdown-icon
+  .bn-toggle-wrapper[data-show-children="true"]
+  .bn-toggle-button::before {
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  border: 0;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  transform: translate(-50%, -50%);
+}
+
+html.vellix-has-chevright-icon
+  .bn-toggle-wrapper[data-show-children="false"]
+  .bn-toggle-button::before {
+  -webkit-mask-image: var(--vellix-icon-chevright);
+  mask-image: var(--vellix-icon-chevright);
+}
+
+html.vellix-has-chevdown-icon
+  .bn-toggle-wrapper[data-show-children="true"]
+  .bn-toggle-button::before {
+  -webkit-mask-image: var(--vellix-icon-chevdown);
+  mask-image: var(--vellix-icon-chevdown);
+}
+
+.bn-toggle-wrapper > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.52;
+}
+
+.bn-toggle-add-block-button {
+  width: auto !important;
+  margin: 7px 0 4px 34px !important;
+  padding: 7px 11px !important;
+  color: var(--vellix-secondary-text) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  background: rgb(255 255 255 / 6%) !important;
+  border: 1px solid rgb(255 255 255 / 10%) !important;
+  border-radius: 999px !important;
+}
+
+.bn-block-content[data-content-type="pageBreak"] > div {
+  height: 32px !important;
+  margin: 12px 0 !important;
+  background: #20202080;
+  border: 1px solid #ffffff14 !important;
+  border-radius: 28px;
+  box-shadow: 0 12px 28px #00000029;
+}
+
+.bn-block-content[data-content-type="divider"] hr {
+  margin: 18px 0 !important;
+  border: 0 !important;
+  border-top: 1px solid #ffffff1a !important;
+}
 
 .vellix-editor-shell svg,
 .vellix-editor-shell svg * {
@@ -210,88 +450,54 @@ html,body,#root{height:auto!important;min-height:0!important;overflow:visible!im
   filter: brightness(0) invert(1);
 }
 
-.vellix-editor-page .bn-block-outer,
-.vellix-editor-page .bn-block,
-.vellix-editor-page .bn-block-content {
-  transition: none !important;
-}
-
-.vellix-has-user-content .bn-trailing-block{display:none!important;height:0!important;margin:0!important;padding:0!important}
-.vellix-has-user-content .bn-block-content:has(.ProseMirror-trailingBreak:only-child):after{content:none!important;display:none!important}
-.vellix-has-user-content .bn-block-outer:has(.bn-block-content .ProseMirror-trailingBreak:only-child){min-height:0!important}
-
-html:not(.vellix-selection-mode) .bn-editor,
-html:not(.vellix-selection-mode) .bn-block-content,
-html:not(.vellix-selection-mode) .bn-inline-content,
-html:not(.vellix-selection-mode) [data-inline-content] {
-  -webkit-user-select: text !important;
-  touch-action: pan-y !important;
-  user-select: text !important;
-}
-
-.bn-editor,
-.bn-block-outer,
-.bn-block,
-.bn-block-content,
-.bn-inline-content {
-  touch-action: pan-y;
-}
-
-/* Swipe drag is the only selection animation. It moves the wrapper only while
-   the finger is pulling; committed selection itself is paint-only. */
+/* Swipe drag is the only selection animation. Committed selection is paint-only. */
 .vellix-dragging-block {
   transform: translateX(var(--vellix-drag-x, 0px)) !important;
   transition: none !important;
 }
 
-/* Selection mode is paint-only. Do not alter BlockNote content width, padding,
-   flex, min-height, or max-width here; those changes rewrap multiline blocks. */
-.vellix-selection-mode .bn-block-outer > .bn-block {
-  background: transparent !important;
-  box-shadow: none !important;
-  isolation: isolate !important;
-  position: relative !important;
+.vellix-selection-mode .bn-editor {
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
-.vellix-selection-mode .vellix-selected-block .bn-block-content,
-.vellix-selection-mode [data-vellix-selected="true"] .bn-block-content {
-  background: transparent !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
+.vellix-selection-mode .bn-block-outer {
+  isolation: isolate;
 }
 
-.vellix-selection-mode .vellix-selected-block > .bn-block::before,
-.vellix-selection-mode [data-vellix-selected="true"] > .bn-block::before {
-  background: #0d5668 !important;
-  border-radius: 8px !important;
-  box-shadow: inset 0 0 0 1px rgb(46 203 255 / 20%) !important;
-  content: "" !important;
-  inset: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  z-index: -1 !important;
+.vellix-selection-mode .bn-block-outer::after {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  background: transparent;
+  border: 3px solid #202020;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%);
+  transform: translateY(-50%);
+  content: "";
 }
 
-.vellix-selection-mode .bn-block-outer > .bn-block::after {
-  background: transparent !important;
-  border: 3px solid #202020 !important;
-  border-radius: 50% !important;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%) !important;
-  content: "" !important;
-  height: 20px !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  right: 6px !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-  width: 20px !important;
+.vellix-selection-mode .vellix-selected-block::before,
+.vellix-selection-mode [data-vellix-selected="true"]::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--vellix-selection-fill);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgb(46 203 255 / 20%);
+  content: "";
 }
 
-.vellix-selection-mode .vellix-selected-block > .bn-block::after,
-.vellix-selection-mode [data-vellix-selected="true"] > .bn-block::after {
-  background: #2ecbff !important;
-  border-color: #2ecbff !important;
-  box-shadow: none !important;
+.vellix-selection-mode .vellix-selected-block::after,
+.vellix-selection-mode [data-vellix-selected="true"]::after {
+  background: var(--vellix-selection-dot);
+  border-color: var(--vellix-selection-dot);
+  box-shadow: none;
 }
 
 .vellix-selection-mode .vellix-selected-block .bn-inline-content,
@@ -301,5 +507,13 @@ html:not(.vellix-selection-mode) [data-inline-content] {
   color: #fff !important;
 }
 
-.vellix-selection-mode .bn-block-content[data-content-type=divider] hr{border-top-color:#ffffff80!important}
-.vellix-selection-mode .vellix-selected-block .bn-block-content[data-content-type=divider] hr{border-top-color:#b7f2ff!important}
+.vellix-selection-mode .bn-block-content[data-content-type="divider"] hr {
+  border-top-color: #ffffff80 !important;
+}
+
+.vellix-selection-mode
+  .vellix-selected-block
+  .bn-block-content[data-content-type="divider"]
+  hr {
+  border-top-color: #b7f2ff !important;
+}

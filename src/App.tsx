@@ -55,7 +55,7 @@ type SelectedBlockType =
   | "toggleListItem";
 
 interface SwipeState {
-  index: number;
+  blockId: string;
   x: number;
   y: number;
   block: HTMLElement;
@@ -75,34 +75,71 @@ function App() {
   type EditorInsertBlocks = Parameters<typeof editor.insertBlocks>[0];
 
   const saveTimerRef = useRef<number | undefined>(undefined);
-  const selectionRef = useRef<Set<number>>(new Set());
+  const selectionRef = useRef<Set<string>>(new Set());
   const swipeRef = useRef<SwipeState | null>(null);
   const focusTimerRef = useRef<number | undefined>(undefined);
   const hasReceivedAppearanceRef = useRef(false);
   const reportHeightRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    async function resolveIconAsset(name: string): Promise<void> {
+      for (const extension of ["svg", "png", "webp"]) {
+        const path = `/vellix-icons/${name}.${extension}`;
+
+        try {
+          const response = await fetch(path, { method: "HEAD" });
+          if (!response.ok) {
+            continue;
+          }
+
+          document.documentElement.style.setProperty(
+            `--vellix-icon-${name}`,
+            `url("${path}")`,
+          );
+          document.documentElement.classList.add(`vellix-has-${name}-icon`);
+          return;
+        } catch {
+          /* Missing optional icon assets fall back to CSS-drawn chevrons. */
+        }
+      }
+    }
+
+    function resolveOptionalIconAssets(): void {
+      void Promise.all([
+        resolveIconAsset("chevright"),
+        resolveIconAsset("chevdown"),
+        resolveIconAsset("chevup"),
+      ]);
+    }
+
     /*
      The list of on-screen block wrappers, in document order.
 
-     BlockNote renders each top-level block inside a `.bn-block-outer`. We
-     prefer the direct children of the editor's block group, and fall back to
-     a flat query trimmed to the document length if the structure differs.
+     BlockNote nests indented blocks inside child block groups, so this must be
+     a flat DOM query by block id rather than direct top-level children.
     */
     function blockOuters(): HTMLElement[] {
-      const direct = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          ".bn-editor > .bn-block-group > .bn-block-outer",
-        ),
-      );
-
-      if (direct.length) {
-        return direct;
-      }
+      const ids = new Set(documentBlocks().map((block) => block.id));
 
       return Array.from(
-        document.querySelectorAll<HTMLElement>(".bn-block-outer"),
-      ).slice(0, editor.document?.length ?? 0);
+        document.querySelectorAll<HTMLElement>(
+          '.bn-editor .bn-block-outer[data-id]',
+        ),
+      ).filter((outer) => ids.has(outer.dataset.id ?? ""));
+    }
+
+    function documentBlocks(): EditorBlock[] {
+      const flattened: EditorBlock[] = [];
+
+      function visit(blocks: readonly EditorBlock[] | undefined): void {
+        blocks?.forEach((block) => {
+          flattened.push(block);
+          visit(block.children as readonly EditorBlock[] | undefined);
+        });
+      }
+
+      visit(editor.document);
+      return flattened;
     }
 
     /*
@@ -181,8 +218,9 @@ function App() {
       );
       document.body?.classList.toggle("vellix-has-user-content", authored);
 
-      outers.forEach((outer, index) => {
-        const selected = selectionRef.current.has(index);
+      outers.forEach((outer) => {
+        const blockId = outer.dataset.id;
+        const selected = blockId ? selectionRef.current.has(blockId) : false;
 
         outer.classList.toggle("vellix-selected-block", selected);
         outer.setAttribute("data-vellix-selected", selected ? "true" : "false");
@@ -213,11 +251,12 @@ function App() {
       const outers = blockOuters();
       const authored = hasUserContent();
 
-      const meaningful = outers.filter((_, index) => {
+      const meaningful = outers.filter((outer) => {
         if (!authored) {
           return true;
         }
-        const block = editor.document?.[index];
+        const blockId = outer.dataset.id;
+        const block = blockId ? editor.getBlock(blockId) : undefined;
         return !!(
           block &&
           (firstText([block]) ||
@@ -247,6 +286,7 @@ function App() {
     }
 
     reportHeightRef.current = reportContentHeight;
+    resolveOptionalIconAssets();
 
     /*
      BlockNote, WKWebView, and web fonts can settle over a few frames. Native
@@ -294,10 +334,9 @@ function App() {
      selection is empty.
     */
     function selectedBlocks(): EditorBlock[] | null {
-      const blocks = Array.from(selectionRef.current)
-        .sort((a, b) => a - b)
-        .map((index) => editor.document[index])
-        .filter(Boolean) as EditorBlock[];
+      const blocks = documentBlocks().filter((block) =>
+        selectionRef.current.has(block.id),
+      );
 
       if (!blocks.length) {
         sendToNative("editorError", {
@@ -333,7 +372,7 @@ function App() {
               icon:
                 typeof payload.icon === "string" && payload.icon.trim()
                   ? payload.icon.trim()
-                  : "sparkles",
+                  : "sparkle",
               color:
                 typeof payload.color === "string" && payload.color.trim()
                   ? payload.color.trim()
@@ -390,7 +429,7 @@ function App() {
         } else {
           editor.updateBlock(block, {
             type: "callout",
-            props: { icon: "sparkles", color },
+            props: { icon: "sparkle", color },
           } as unknown as EditorPartialBlock);
         }
       });
@@ -398,7 +437,7 @@ function App() {
     }
 
     function updateCalloutIcon(blockId: string | undefined, icon: string): void {
-      const trimmedIcon = icon.trim() || "sparkles";
+      const trimmedIcon = icon.trim() || "sparkle";
 
       if (blockId) {
         const block = editor.getBlock(blockId);
@@ -464,7 +503,7 @@ function App() {
     }
 
     function selectAll(): void {
-      selectionRef.current = new Set(editor.document.map((_, index) => index));
+      selectionRef.current = new Set(documentBlocks().map((block) => block.id));
       blurEditor();
       applySelectionState();
     }
@@ -479,12 +518,9 @@ function App() {
     }
 
     function deleteSelected(): void {
-      const blocks = Array.from(selectionRef.current)
-        .sort((a, b) => b - a)
-        .map((index) => editor.document[index])
-        .filter(Boolean) as EditorBlock[];
+      const blocks = selectedBlocks();
 
-      if (!blocks.length) {
+      if (!blocks?.length) {
         return;
       }
 
@@ -525,17 +561,16 @@ function App() {
     }
 
     function duplicateSelected(): void {
-      const indices = Array.from(selectionRef.current).sort((a, b) => a - b);
-      if (!indices.length) {
+      const blocks = selectedBlocks();
+      if (!blocks?.length) {
         return;
       }
 
-      const copies = indices
-        .map((index) => editor.document[index])
-        .filter(Boolean)
-        .map((block) => reassignIds(clone(block) as Record<string, unknown>));
+      const copies = blocks.map((block) =>
+        reassignIds(clone(block) as Record<string, unknown>),
+      );
 
-      const anchor = editor.document[indices[indices.length - 1]];
+      const anchor = blocks[blocks.length - 1];
       if (!anchor || !copies.length) {
         return;
       }
@@ -594,16 +629,19 @@ function App() {
         return;
       }
       const target = event.target as HTMLElement;
+      if (target.closest?.("[data-vellix-editor-control]")) {
+        return;
+      }
       const block = target.closest?.(".bn-block-outer") as HTMLElement | null;
       if (!block) {
         return;
       }
-      const index = blockOuters().indexOf(block);
-      if (index < 0) {
+      const blockId = block.dataset.id;
+      if (!blockId || !editor.getBlock(blockId)) {
         return;
       }
       swipeRef.current = {
-        index,
+        blockId,
         x: event.clientX,
         y: event.clientY,
         block,
@@ -650,14 +688,14 @@ function App() {
       }
     }
 
-    function commitSwipe(dx: number, dyAbs: number, index: number): void {
+    function commitSwipe(dx: number, dyAbs: number, blockId: string): void {
       clearDragVisual();
 
       if (dx < SWIPE_TRIGGER_DISTANCE && dyAbs < SWIPE_VERTICAL_TOLERANCE) {
-        if (selectionRef.current.has(index)) {
-          selectionRef.current.delete(index);
+        if (selectionRef.current.has(blockId)) {
+          selectionRef.current.delete(blockId);
         } else {
-          selectionRef.current.add(index);
+          selectionRef.current.add(blockId);
         }
         /*
          One quick native haptic per swipe-toggle. iOS WKWebView has no
@@ -676,7 +714,11 @@ function App() {
       if (!swipe || event.pointerId !== swipe.pointerId) {
         return;
       }
-      commitSwipe(event.clientX - swipe.x, Math.abs(event.clientY - swipe.y), swipe.index);
+      commitSwipe(
+        event.clientX - swipe.x,
+        Math.abs(event.clientY - swipe.y),
+        swipe.blockId,
+      );
       swipeRef.current = null;
     }
 
@@ -689,7 +731,7 @@ function App() {
       if (!swipe || event.pointerId !== swipe.pointerId) {
         return;
       }
-      commitSwipe(swipe.lastDx, swipe.lastDyAbs, swipe.index);
+      commitSwipe(swipe.lastDx, swipe.lastDyAbs, swipe.blockId);
       swipeRef.current = null;
     }
 
@@ -909,7 +951,7 @@ function App() {
           }
 
           case "insertCallout": {
-            const icon = (message.payload?.icon as string | undefined) || "sparkles";
+            const icon = (message.payload?.icon as string | undefined) || "sparkle";
             const text = (message.payload?.text as string | undefined) || "Callout";
             const color = (message.payload?.color as string | undefined) || "#ffffff";
             const anchor =

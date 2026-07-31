@@ -3,25 +3,38 @@ import { createReactBlockSpec } from "@blocknote/react";
 
 import { sendToNative } from "./NativeBridge";
 
-const DEFAULT_CALLOUT_ICON = "sparkles";
+const DEFAULT_CALLOUT_ICON = "sparkle";
 const DEFAULT_CALLOUT_COLOR = "#ffffff";
 
 function iconGlyph(icon: string): string {
-  switch (icon) {
-    case "sparkles":
-      return "✦";
-    case "heart":
-    case "heart.fill":
-      return "♡";
-    case "star":
-    case "star.fill":
-      return "★";
-    case "moon":
-    case "moon.fill":
-      return "☾";
-    default:
-      return "✧";
+  const normalized = icon.toLowerCase();
+
+  if (normalized.includes("heart")) {
+    return "♡";
   }
+  if (normalized.includes("star")) {
+    return "★";
+  }
+  if (normalized.includes("moon")) {
+    return "☾";
+  }
+  if (normalized.includes("check")) {
+    return "✓";
+  }
+  if (normalized.includes("book") || normalized.includes("doc")) {
+    return "▤";
+  }
+  if (normalized.includes("code") || normalized.includes("window")) {
+    return "</>";
+  }
+  if (normalized.includes("cal")) {
+    return "◷";
+  }
+  if (normalized.includes("chat")) {
+    return "◌";
+  }
+
+  return "✦";
 }
 
 export const calloutBlockSpec = createReactBlockSpec(
@@ -64,14 +77,23 @@ export const calloutBlockSpec = createReactBlockSpec(
             type="button"
             className="vellix-callout-icon"
             data-vellix-icon
+            data-vellix-editor-control
             contentEditable={false}
-            onMouseDown={(event) => event.preventDefault()}
-            onTouchStart={(event) => event.preventDefault()}
-            onClick={() => {
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerUp={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
               sendToNative("requestCalloutIconPicker", {
                 blockId: props.block.id,
                 icon,
               });
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
             }}
           >
             {iconGlyph(icon)}
