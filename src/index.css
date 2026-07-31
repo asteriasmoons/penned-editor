@@ -1,5 +1,6 @@
 :root {
   font-family:
+    ui-rounded,
     Inter,
     -apple-system,
     BlinkMacSystemFont,
@@ -155,10 +156,10 @@ select {
    neutralizers, and the swipe-to-select selection UI.
    ========================================================================== */
 
-:root{--vellix-font-family:'SF Pro Rounded',Inter,-apple-system,BlinkMacSystemFont,sans-serif;--vellix-page-background:#202020}
+:root{--vellix-font-family:ui-rounded,'SF Pro Rounded',Inter,-apple-system,BlinkMacSystemFont,sans-serif;--vellix-page-background:#202020}
 .vellix-editor-shell{background:transparent!important}
 .vellix-editor-page{background:var(--vellix-page-background)!important;border-radius:0;color:var(--vellix-primary-text)!important;font-family:var(--vellix-font-family)!important;min-height:100%;padding:0!important;width:100%!important}
-.bn-default-styles,.bn-editor,.bn-block-content{font-family:var(--vellix-font-family)!important}
+.bn-container,.bn-default-styles,.bn-editor,.ProseMirror,.bn-block-content,.bn-inline-content,[data-inline-content]{font-family:var(--vellix-font-family)!important}
 .bn-editor{min-height:520px!important;color:var(--vellix-primary-text)!important;font-size:18px;line-height:1.68}
 .bn-block-content,.bn-inline-content{color:var(--vellix-primary-text)!important}
 .bn-block-content[data-content-type=heading]{font-family:var(--vellix-font-family)!important;font-weight:800;letter-spacing:0}

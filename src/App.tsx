@@ -6,6 +6,7 @@ import type { Block, PartialBlock } from "@blocknote/core";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/ariakit/style.css";
 
+import { applyAppearance } from "./appearance";
 import { sendToNative } from "./NativeBridge";
 import type { NativeMessage } from "./NativeBridge";
 
@@ -53,6 +54,7 @@ function App() {
   const selectionRef = useRef<Set<number>>(new Set());
   const swipeRef = useRef<SwipeState | null>(null);
   const focusTimerRef = useRef<number | undefined>(undefined);
+  const hasReceivedAppearanceRef = useRef(false);
   const reportHeightRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -219,6 +221,47 @@ function App() {
     }
 
     reportHeightRef.current = reportContentHeight;
+
+    /*
+     BlockNote, WKWebView, and web fonts can settle over a few frames. Native
+     uses these reports to size the SwiftUI wrapper, so send one immediately and
+     then repeat after layout/font resolution instead of waiting for one delayed
+     measurement.
+    */
+    function runSettledContentHeightReports(): void {
+      reportContentHeight();
+
+      requestAnimationFrame(() => {
+        reportContentHeight();
+        requestAnimationFrame(reportContentHeight);
+      });
+
+      window.setTimeout(reportContentHeight, 40);
+      window.setTimeout(reportContentHeight, 120);
+
+      void document.fonts?.ready
+        ?.then(() => {
+          reportContentHeight();
+          window.setTimeout(reportContentHeight, 40);
+        })
+        .catch(() => {
+          /* Font readiness is best-effort in embedded web views. */
+        });
+    }
+
+    function scheduleContentHeightReports(
+      options: { waitForInitialAppearance?: boolean } = {},
+    ): void {
+      if (
+        options.waitForInitialAppearance &&
+        !hasReceivedAppearanceRef.current
+      ) {
+        window.setTimeout(runSettledContentHeightReports, 24);
+        return;
+      }
+
+      runSettledContentHeightReports();
+    }
 
     /*
      The selected blocks in document order, or null (with an error) if the
@@ -553,7 +596,7 @@ function App() {
               blocks as unknown as PartialBlock[],
             );
             selectionRef.current.clear();
-            window.setTimeout(reportContentHeight, 40);
+            scheduleContentHeightReports({ waitForInitialAppearance: true });
             break;
           }
 
@@ -587,19 +630,9 @@ function App() {
 
           case "setAppearance": {
             const payload = (message.payload ?? {}) as Record<string, unknown>;
-            const style = document.documentElement.style;
-            if (payload.textColor) {
-              style.setProperty("--vellix-primary-text", String(payload.textColor));
-            }
-            if (payload.fontFamily) {
-              style.setProperty("--vellix-font-family", String(payload.fontFamily));
-            }
-            if (payload.pageBackground) {
-              style.setProperty(
-                "--vellix-page-background",
-                String(payload.pageBackground),
-              );
-            }
+            hasReceivedAppearanceRef.current = true;
+            applyAppearance(payload);
+            scheduleContentHeightReports();
             break;
           }
 
@@ -771,8 +804,7 @@ function App() {
      hand off from its instant-preview placeholder quickly, then again after
      layout settles.
     */
-    requestAnimationFrame(reportContentHeight);
-    window.setTimeout(reportContentHeight, 80);
+    scheduleContentHeightReports();
 
     return () => {
       delete window.receiveNativeMessage;
