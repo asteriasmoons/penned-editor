@@ -25,6 +25,20 @@ function ensureRuntimeAppearanceStyle(): void {
     document.head.append(style);
   }
 
+  /*
+   The stylesheet content is static, so write it only once. Re-assigning
+   textContent on every call replaces the <style> child text node, which is a
+   childList mutation inside the documentElement subtree watched by the
+   MutationObserver in App. That observer reacts by scheduling another
+   reinforceEditorAppearance(), which calls back here and rewrites textContent
+   again — an endless mutate -> observe -> reinforce loop that floods the
+   native bridge until WebKit terminates the web process.
+  */
+  if (style.dataset.vellixStyleReady === "true") {
+    return;
+  }
+  style.dataset.vellixStyleReady = "true";
+
   style.textContent = `
 html,
 body,

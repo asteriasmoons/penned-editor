@@ -81,6 +81,7 @@ function App() {
   const hasReceivedAppearanceRef = useRef(false);
   const lastSelectionCountRef = useRef<number | undefined>(undefined);
   const reportHeightRef = useRef<(() => void) | null>(null);
+  const lastReportedHeightRef = useRef<number>(-1);
 
   useEffect(() => {
     /*
@@ -255,7 +256,16 @@ function App() {
         );
       }
 
-      sendToNative("contentHeightChanged", { height });
+      /*
+       Only notify native when the measured height actually changes. Native
+       sizes its container to this value, which resizes the web view and fires
+       our ResizeObserver again; without this guard the two sides ping-pong
+       every frame and flood the bridge until WebKit kills the web process.
+      */
+      if (Math.abs(height - lastReportedHeightRef.current) > 1) {
+        lastReportedHeightRef.current = height;
+        sendToNative("contentHeightChanged", { height });
+      }
       applySelectionState();
     }
 
@@ -764,7 +774,21 @@ function App() {
       blurEditor();
     }
 
-    const resizeObserver = new ResizeObserver(() => reportContentHeight());
+    /*
+     Coalesce resize bursts into a single measurement per frame. ResizeObserver
+     can fire several times synchronously and reportContentHeight forces a
+     layout on every call, so batching avoids a resize storm.
+    */
+    let resizeFrame: number | undefined;
+    const resizeObserver = new ResizeObserver(() => {
+      if (resizeFrame !== undefined) {
+        return;
+      }
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        reportContentHeight();
+      });
+    });
     resizeObserver.observe(document.documentElement);
 
     let appearanceFrame: number | undefined;
@@ -1094,6 +1118,9 @@ function App() {
       window.clearTimeout(focusTimerRef.current);
       if (appearanceFrame !== undefined) {
         cancelAnimationFrame(appearanceFrame);
+      }
+      if (resizeFrame !== undefined) {
+        cancelAnimationFrame(resizeFrame);
       }
       resizeObserver.disconnect();
       mutationObserver.disconnect();
