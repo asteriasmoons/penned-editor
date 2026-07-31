@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { BlockNoteView } from "@blocknote/ariakit";
 import { useCreateBlockNote } from "@blocknote/react";
-import type { Block, PartialBlock } from "@blocknote/core";
+import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/ariakit/style.css";
 
 import { applyAppearance, reinforceEditorAppearance } from "./appearance";
+import { calloutBlockSpec } from "./calloutBlock";
 import { sendToNative } from "./NativeBridge";
 import type { NativeMessage } from "./NativeBridge";
 
@@ -36,6 +37,23 @@ const SWIPE_VERTICAL_TOLERANCE = 54;
 */
 const SWIPE_ACTIVATION_DISTANCE = -8;
 
+const editorSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    callout: calloutBlockSpec,
+  },
+});
+
+type SelectedBlockType =
+  | "bulletListItem"
+  | "callout"
+  | "checkListItem"
+  | "heading"
+  | "numberedListItem"
+  | "paragraph"
+  | "quote"
+  | "toggleListItem";
+
 interface SwipeState {
   index: number;
   x: number;
@@ -48,7 +66,13 @@ interface SwipeState {
 }
 
 function App() {
-  const editor = useCreateBlockNote();
+  const editor = useCreateBlockNote({
+    schema: editorSchema,
+  });
+
+  type EditorBlock = (typeof editor.document)[number];
+  type EditorPartialBlock = Parameters<typeof editor.updateBlock>[1];
+  type EditorInsertBlocks = Parameters<typeof editor.insertBlocks>[0];
 
   const saveTimerRef = useRef<number | undefined>(undefined);
   const selectionRef = useRef<Set<number>>(new Set());
@@ -269,11 +293,11 @@ function App() {
      The selected blocks in document order, or null (with an error) if the
      selection is empty.
     */
-    function selectedBlocks(): Block[] | null {
+    function selectedBlocks(): EditorBlock[] | null {
       const blocks = Array.from(selectionRef.current)
         .sort((a, b) => a - b)
         .map((index) => editor.document[index])
-        .filter(Boolean) as Block[];
+        .filter(Boolean) as EditorBlock[];
 
       if (!blocks.length) {
         sendToNative("editorError", {
@@ -283,6 +307,147 @@ function App() {
       }
 
       return blocks;
+    }
+
+    function sendDocumentChanged(): void {
+      window.setTimeout(reportContentHeight, 40);
+      sendToNative("documentChanged", { blocks: editor.document });
+    }
+
+    function selectedBlockUpdate(
+      type: SelectedBlockType,
+      payload: Record<string, unknown>,
+    ): EditorPartialBlock {
+      switch (type) {
+        case "heading": {
+          const level =
+            typeof payload.level === "number" && payload.level >= 1
+              ? Math.min(6, Math.floor(payload.level))
+              : 3;
+          return { type: "heading", props: { level } } as EditorPartialBlock;
+        }
+        case "callout": {
+          return {
+            type: "callout",
+            props: {
+              icon:
+                typeof payload.icon === "string" && payload.icon.trim()
+                  ? payload.icon.trim()
+                  : "sparkles",
+              color:
+                typeof payload.color === "string" && payload.color.trim()
+                  ? payload.color.trim()
+                  : "#ffffff",
+            },
+          } as unknown as EditorPartialBlock;
+        }
+        case "checkListItem":
+          return {
+            type: "checkListItem",
+            props: { checked: false },
+          } as EditorPartialBlock;
+        default:
+          return { type, props: {} } as EditorPartialBlock;
+      }
+    }
+
+    function transformSelectedBlocks(
+      type: SelectedBlockType,
+      payload: Record<string, unknown> = {},
+    ): void {
+      const blocks = selectedBlocks();
+      if (!blocks) {
+        return;
+      }
+
+      try {
+        const update = selectedBlockUpdate(type, payload);
+        blocks.forEach((block) => {
+          editor.updateBlock(block, update);
+        });
+        sendDocumentChanged();
+      } catch (error) {
+        sendToNative("editorError", {
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not update selected blocks.",
+        });
+      }
+    }
+
+    function updateSelectedCalloutColor(color: string): void {
+      const blocks = selectedBlocks();
+      if (!blocks) {
+        return;
+      }
+
+      blocks.forEach((block) => {
+        if (block.type === "callout") {
+          editor.updateBlock(block, {
+            props: { color },
+          } as EditorPartialBlock);
+        } else {
+          editor.updateBlock(block, {
+            type: "callout",
+            props: { icon: "sparkles", color },
+          } as unknown as EditorPartialBlock);
+        }
+      });
+      sendDocumentChanged();
+    }
+
+    function updateCalloutIcon(blockId: string | undefined, icon: string): void {
+      const trimmedIcon = icon.trim() || "sparkles";
+
+      if (blockId) {
+        const block = editor.getBlock(blockId);
+        if (block?.type === "callout") {
+          editor.updateBlock(block, {
+            props: { icon: trimmedIcon },
+          } as EditorPartialBlock);
+          sendDocumentChanged();
+          return;
+        }
+      }
+
+      const blocks = selectedBlocks();
+      if (!blocks) {
+        return;
+      }
+
+      blocks.forEach((block) => {
+        if (block.type === "callout") {
+          editor.updateBlock(block, {
+            props: { icon: trimmedIcon },
+          } as EditorPartialBlock);
+        }
+      });
+      sendDocumentChanged();
+    }
+
+    function moveSelectedBlocks(direction: "in" | "out"): void {
+      const blocks = selectedBlocks();
+      if (!blocks) {
+        return;
+      }
+
+      const orderedBlocks = direction === "in" ? blocks : [...blocks].reverse();
+
+      orderedBlocks.forEach((block) => {
+        editor.setTextCursorPosition(block, "start");
+        if (direction === "in") {
+          if (editor.canNestBlock()) {
+            editor.nestBlock();
+          }
+        } else if (editor.canUnnestBlock()) {
+          editor.unnestBlock();
+        }
+      });
+
+      selectionRef.current.clear();
+      applySelectionState();
+      sendDocumentChanged();
     }
 
     function blurEditor(): void {
@@ -317,7 +482,7 @@ function App() {
       const blocks = Array.from(selectionRef.current)
         .sort((a, b) => b - a)
         .map((index) => editor.document[index])
-        .filter(Boolean) as Block[];
+        .filter(Boolean) as EditorBlock[];
 
       if (!blocks.length) {
         return;
@@ -376,7 +541,7 @@ function App() {
       }
 
       try {
-        editor.insertBlocks(copies as unknown as PartialBlock[], anchor, "after");
+        editor.insertBlocks(copies as unknown as EditorInsertBlocks, anchor, "after");
         selectionRef.current.clear();
         window.setTimeout(reportContentHeight, 40);
         sendToNative("documentChanged", { blocks: editor.document });
@@ -615,7 +780,7 @@ function App() {
             }
             editor.replaceBlocks(
               editor.document,
-              blocks as unknown as PartialBlock[],
+              blocks as unknown as EditorInsertBlocks,
             );
             selectionRef.current.clear();
             reinforceEditorAppearance();
@@ -689,7 +854,7 @@ function App() {
                     children: [],
                   };
             const [inserted] = editor.insertBlocks(
-              [block as unknown as PartialBlock],
+              [block] as unknown as EditorInsertBlocks,
               anchor,
               "after",
             );
@@ -707,7 +872,14 @@ function App() {
               editor.document[editor.document.length - 1];
             try {
               const [inserted] = editor.insertBlocks(
-                [{ type: "pageBreak", props: {}, content: [], children: [] } as unknown as PartialBlock],
+                [
+                  {
+                    type: "pageBreak",
+                    props: {},
+                    content: [],
+                    children: [],
+                  },
+                ] as unknown as EditorInsertBlocks,
                 anchor,
                 "after",
               );
@@ -716,7 +888,14 @@ function App() {
               }
             } catch {
               const [fallback] = editor.insertBlocks(
-                [{ type: "divider", props: {}, content: [], children: [] } as unknown as PartialBlock],
+                [
+                  {
+                    type: "divider",
+                    props: {},
+                    content: [],
+                    children: [],
+                  },
+                ] as unknown as EditorInsertBlocks,
                 anchor,
                 "after",
               );
@@ -732,27 +911,27 @@ function App() {
           case "insertCallout": {
             const icon = (message.payload?.icon as string | undefined) || "sparkles";
             const text = (message.payload?.text as string | undefined) || "Callout";
+            const color = (message.payload?.color as string | undefined) || "#ffffff";
             const anchor =
               editor.getTextCursorPosition?.()?.block ??
               editor.document[editor.document.length - 1];
             const block: Record<string, unknown> = {
-              type: "quote",
+              type: "callout",
               props: {
-                textColor: "default",
-                backgroundColor: "gray",
-                textAlignment: "left",
+                icon,
+                color,
               },
               content: [
                 {
                   type: "text",
-                  text: `${icon} ${text}`,
-                  styles: { bold: true },
+                  text,
+                  styles: {},
                 },
               ],
               children: [],
             };
             const [inserted] = editor.insertBlocks(
-              [block as unknown as PartialBlock],
+              [block] as unknown as EditorInsertBlocks,
               anchor,
               "after",
             );
@@ -761,6 +940,50 @@ function App() {
             }
             window.setTimeout(reportContentHeight, 40);
             sendToNative("documentChanged", { blocks: editor.document });
+            break;
+          }
+
+          case "setSelectedBlockType": {
+            const blockType = message.payload?.blockType;
+            if (typeof blockType !== "string") {
+              throw new Error("setSelectedBlockType requires a blockType.");
+            }
+            transformSelectedBlocks(
+              blockType as SelectedBlockType,
+              message.payload ?? {},
+            );
+            break;
+          }
+
+          case "indentSelectedBlocks": {
+            moveSelectedBlocks("in");
+            break;
+          }
+
+          case "outdentSelectedBlocks": {
+            moveSelectedBlocks("out");
+            break;
+          }
+
+          case "setSelectedCalloutColor": {
+            const color = message.payload?.color;
+            if (typeof color !== "string") {
+              throw new Error("setSelectedCalloutColor requires a color.");
+            }
+            updateSelectedCalloutColor(color);
+            break;
+          }
+
+          case "updateCalloutIcon": {
+            const icon = message.payload?.icon;
+            const blockId = message.payload?.blockId;
+            if (typeof icon !== "string") {
+              throw new Error("updateCalloutIcon requires an icon.");
+            }
+            updateCalloutIcon(
+              typeof blockId === "string" ? blockId : undefined,
+              icon,
+            );
             break;
           }
 
