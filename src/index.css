@@ -29,6 +29,9 @@
     sans-serif;
   --vellix-selection-fill: #0d5668;
   --vellix-selection-dot: #2ecbff;
+  --vellix-icon-chevright: url("/vellix-icons/chevright.svg");
+  --vellix-icon-chevdown: url("/vellix-icons/chevdown.svg");
+  --vellix-icon-chevup: url("/vellix-icons/chevup.svg");
 }
 
 * {
@@ -198,14 +201,9 @@ html:not(.vellix-selection-mode) .bn-inline-content,
 html:not(.vellix-selection-mode) [data-inline-content] {
   -webkit-user-select: text !important;
   user-select: text !important;
-  touch-action: pan-y !important;
 }
 
-.bn-editor,
-.bn-block-outer,
-.bn-block,
-.bn-block-content,
-.bn-inline-content {
+.bn-block-outer {
   touch-action: pan-y;
 }
 
@@ -274,6 +272,34 @@ html:not(.vellix-selection-mode) [data-inline-content] {
   border-radius: 14px;
   touch-action: manipulation;
   user-select: none;
+}
+
+.vellix-callout-icon-mask {
+  position: relative;
+  display: block;
+  width: 22px;
+  height: 22px;
+  color: #fff;
+  background: currentColor;
+  -webkit-mask-image: var(--vellix-callout-icon-url);
+  mask-image: var(--vellix-callout-icon-url);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.vellix-callout-icon-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  font: 800 18px/1 var(--vellix-font-family);
+  pointer-events: none;
 }
 
 .vellix-callout-text {
@@ -355,28 +381,12 @@ html:not(.vellix-selection-mode) [data-inline-content] {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: translate(-62%, -50%) rotate(-45deg);
-  content: "";
-}
-
-.bn-toggle-wrapper[data-show-children="true"] .bn-toggle-button::before {
-  transform: translate(-50%, -62%) rotate(45deg);
-}
-
-html.vellix-has-chevright-icon
-  .bn-toggle-wrapper[data-show-children="false"]
-  .bn-toggle-button::before,
-html.vellix-has-chevdown-icon
-  .bn-toggle-wrapper[data-show-children="true"]
-  .bn-toggle-button::before {
   width: 13px;
   height: 13px;
   background: currentColor;
   border: 0;
+  -webkit-mask-image: var(--vellix-icon-chevright);
+  mask-image: var(--vellix-icon-chevright);
   -webkit-mask-position: center;
   mask-position: center;
   -webkit-mask-repeat: no-repeat;
@@ -384,20 +394,13 @@ html.vellix-has-chevdown-icon
   -webkit-mask-size: contain;
   mask-size: contain;
   transform: translate(-50%, -50%);
+  content: "";
 }
 
-html.vellix-has-chevright-icon
-  .bn-toggle-wrapper[data-show-children="false"]
-  .bn-toggle-button::before {
-  -webkit-mask-image: var(--vellix-icon-chevright);
-  mask-image: var(--vellix-icon-chevright);
-}
-
-html.vellix-has-chevdown-icon
-  .bn-toggle-wrapper[data-show-children="true"]
-  .bn-toggle-button::before {
+.bn-toggle-wrapper[data-show-children="true"] .bn-toggle-button::before {
   -webkit-mask-image: var(--vellix-icon-chevdown);
   mask-image: var(--vellix-icon-chevdown);
+  transform: translate(-50%, -50%);
 }
 
 .bn-toggle-wrapper > p {

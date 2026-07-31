@@ -6,7 +6,7 @@ import { sendToNative } from "./NativeBridge";
 const DEFAULT_CALLOUT_ICON = "sparkle";
 const DEFAULT_CALLOUT_COLOR = "#ffffff";
 
-function iconGlyph(icon: string): string {
+function iconFallbackGlyph(icon: string): string {
   const normalized = icon.toLowerCase();
 
   if (normalized.includes("heart")) {
@@ -35,6 +35,40 @@ function iconGlyph(icon: string): string {
   }
 
   return "✦";
+}
+
+function normalizedIconName(icon: string): string {
+  const trimmed = icon.trim() || DEFAULT_CALLOUT_ICON;
+  const lower = trimmed.toLowerCase();
+
+  return (
+    lower
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || DEFAULT_CALLOUT_ICON
+  );
+}
+
+function iconAssetPath(icon: string): string {
+  return `/asset-icons/${encodeURIComponent(normalizedIconName(icon))}.png`;
+}
+
+function calloutIconElement(icon: string) {
+  return (
+    <span
+      aria-hidden="true"
+      className="vellix-callout-icon-mask"
+      data-fallback-icon={iconFallbackGlyph(icon)}
+      style={
+        {
+          "--vellix-callout-icon-url": `url("${iconAssetPath(icon)}")`,
+        } as CSSProperties
+      }
+    >
+      <span className="vellix-callout-icon-fallback">
+        {iconFallbackGlyph(icon)}
+      </span>
+    </span>
+  );
 }
 
 export const calloutBlockSpec = createReactBlockSpec(
@@ -76,7 +110,9 @@ export const calloutBlockSpec = createReactBlockSpec(
           <button
             type="button"
             className="vellix-callout-icon"
+            aria-label="Change callout icon"
             data-vellix-icon
+            data-vellix-callout-icon={icon}
             data-vellix-editor-control
             contentEditable={false}
             onPointerDown={(event) => {
@@ -96,7 +132,7 @@ export const calloutBlockSpec = createReactBlockSpec(
               event.stopPropagation();
             }}
           >
-            {iconGlyph(icon)}
+            {calloutIconElement(icon)}
           </button>
           <div className="vellix-callout-text" ref={props.contentRef} />
         </div>
@@ -112,7 +148,14 @@ export const calloutBlockSpec = createReactBlockSpec(
           data-callout-icon={icon}
           data-callout-color={color}
         >
-          <span>{iconGlyph(icon)}</span>
+          <span
+            className="vellix-callout-icon-mask"
+            style={
+              {
+                "--vellix-callout-icon-url": `url("${iconAssetPath(icon)}")`,
+              } as CSSProperties
+            }
+          />
           <span ref={props.contentRef} />
         </aside>
       );

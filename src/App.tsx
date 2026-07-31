@@ -35,7 +35,7 @@ const SWIPE_VERTICAL_TOLERANCE = 54;
  swipe and capture the pointer, so the browser can no longer hand it to text
  selection or scrolling.
 */
-const SWIPE_ACTIVATION_DISTANCE = -8;
+const SWIPE_ACTIVATION_DISTANCE = -18;
 
 const editorSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -79,39 +79,10 @@ function App() {
   const swipeRef = useRef<SwipeState | null>(null);
   const focusTimerRef = useRef<number | undefined>(undefined);
   const hasReceivedAppearanceRef = useRef(false);
+  const lastSelectionCountRef = useRef<number | undefined>(undefined);
   const reportHeightRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    async function resolveIconAsset(name: string): Promise<void> {
-      for (const extension of ["svg", "png", "webp"]) {
-        const path = `/vellix-icons/${name}.${extension}`;
-
-        try {
-          const response = await fetch(path, { method: "HEAD" });
-          if (!response.ok) {
-            continue;
-          }
-
-          document.documentElement.style.setProperty(
-            `--vellix-icon-${name}`,
-            `url("${path}")`,
-          );
-          document.documentElement.classList.add(`vellix-has-${name}-icon`);
-          return;
-        } catch {
-          /* Missing optional icon assets fall back to CSS-drawn chevrons. */
-        }
-      }
-    }
-
-    function resolveOptionalIconAssets(): void {
-      void Promise.all([
-        resolveIconAsset("chevright"),
-        resolveIconAsset("chevdown"),
-        resolveIconAsset("chevup"),
-      ]);
-    }
-
     /*
      The list of on-screen block wrappers, in document order.
 
@@ -233,9 +204,12 @@ function App() {
           );
       });
 
-      sendToNative("blockSelectionChanged", {
-        count: selectionRef.current.size,
-      });
+      if (lastSelectionCountRef.current !== selectionRef.current.size) {
+        lastSelectionCountRef.current = selectionRef.current.size;
+        sendToNative("blockSelectionChanged", {
+          count: selectionRef.current.size,
+        });
+      }
     }
 
     /*
@@ -286,7 +260,6 @@ function App() {
     }
 
     reportHeightRef.current = reportContentHeight;
-    resolveOptionalIconAssets();
 
     /*
      BlockNote, WKWebView, and web fonts can settle over a few frames. Native
@@ -629,7 +602,11 @@ function App() {
         return;
       }
       const target = event.target as HTMLElement;
-      if (target.closest?.("[data-vellix-editor-control]")) {
+      if (
+        target.closest?.(
+          "button, input, textarea, select, a, [data-vellix-editor-control], .bn-toggle-button, .bn-toggle-add-block-button",
+        )
+      ) {
         return;
       }
       const block = target.closest?.(".bn-block-outer") as HTMLElement | null;
@@ -659,13 +636,21 @@ function App() {
       }
       const dx = event.clientX - swipe.x;
       const dyAbs = Math.abs(event.clientY - swipe.y);
+      const horizontalAbs = Math.abs(dx);
       swipe.lastDx = dx;
       swipe.lastDyAbs = dyAbs;
+
+      if (!swipe.active && dyAbs > 8 && dyAbs > horizontalAbs) {
+        clearDragVisual();
+        swipeRef.current = null;
+        return;
+      }
 
       if (
         !swipe.active &&
         dx < SWIPE_ACTIVATION_DISTANCE &&
-        dyAbs < SWIPE_VERTICAL_TOLERANCE
+        dyAbs < SWIPE_VERTICAL_TOLERANCE &&
+        horizontalAbs > dyAbs * 1.25
       ) {
         /*
          Clearly a left swipe now: capture the pointer so the browser can no
@@ -681,7 +666,12 @@ function App() {
         }
       }
 
-      if (dx < 0 && dyAbs < SWIPE_VERTICAL_TOLERANCE) {
+      if (swipe.active) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      if (dx < 0 && dyAbs < SWIPE_VERTICAL_TOLERANCE && horizontalAbs > dyAbs) {
         const offset = Math.max(SWIPE_MAX_DRAG_DISTANCE, Math.min(0, dx));
         swipe.block.classList.add("vellix-dragging-block");
         swipe.block.style.setProperty("--vellix-drag-x", `${offset}px`);
