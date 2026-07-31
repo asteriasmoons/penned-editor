@@ -1,6 +1,9 @@
 :root {
   font-family:
     ui-rounded,
+    -apple-system-rounded,
+    "SF Pro Rounded",
+    "SF Pro Display",
     Inter,
     -apple-system,
     BlinkMacSystemFont,
@@ -156,10 +159,10 @@ select {
    neutralizers, and the swipe-to-select selection UI.
    ========================================================================== */
 
-:root{--vellix-font-family:ui-rounded,'SF Pro Rounded',Inter,-apple-system,BlinkMacSystemFont,sans-serif;--vellix-page-background:#202020}
+:root{--vellix-font-family:ui-rounded,-apple-system-rounded,'SF Pro Rounded','SF Pro Display',Inter,-apple-system,BlinkMacSystemFont,sans-serif;--vellix-page-background:#202020}
 .vellix-editor-shell{background:transparent!important}
 .vellix-editor-page{background:var(--vellix-page-background)!important;border-radius:0;color:var(--vellix-primary-text)!important;font-family:var(--vellix-font-family)!important;min-height:100%;padding:0!important;width:100%!important}
-.bn-container,.bn-default-styles,.bn-editor,.ProseMirror,.bn-block-content,.bn-inline-content,[data-inline-content]{font-family:var(--vellix-font-family)!important}
+.bn-container,.bn-default-styles,.bn-editor,.ProseMirror,.bn-block,.bn-block-content,.bn-inline-content,[data-inline-content],.bn-default-styles *,.ProseMirror *{font-family:var(--vellix-font-family)!important}
 .bn-editor{min-height:520px!important;color:var(--vellix-primary-text)!important;font-size:18px;line-height:1.68}
 .bn-block-content,.bn-inline-content{color:var(--vellix-primary-text)!important}
 .bn-block-content[data-content-type=heading]{font-family:var(--vellix-font-family)!important;font-weight:800;letter-spacing:0}
@@ -186,6 +189,21 @@ html,body,#root{height:auto!important;min-height:0!important;overflow:visible!im
 .vellix-editor-page .bn-editor{min-height:0!important;padding-bottom:2px!important}
 
 @media (max-width:700px){.bn-editor,.bn-default-styles{font-size:15px!important}.bn-block-content{padding:1px 0!important}.bn-block-content[data-content-type=heading]{font-size:1.32em!important}.bn-block-content[data-content-type=paragraph]{line-height:1.46!important}}
+
+.vellix-editor-shell svg,
+.vellix-editor-shell svg * {
+  color: #fff !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.vellix-editor-shell [data-vellix-icon],
+.vellix-editor-shell .vellix-icon,
+.vellix-editor-shell [data-vellix-icon] img,
+.vellix-editor-shell .vellix-icon img {
+  color: #fff !important;
+  filter: brightness(0) invert(1);
+}
 
 .vellix-editor-page .bn-block-outer,
 .vellix-editor-page .bn-block,

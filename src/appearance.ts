@@ -1,4 +1,5 @@
 const APPEARANCE_STORAGE_KEY = "vellix.editor.appearance.v1";
+const RUNTIME_STYLE_ID = "vellix-runtime-appearance-style";
 
 export interface EditorAppearance {
   fontFamily?: string;
@@ -11,9 +12,54 @@ export type EditorAppearancePayload = Record<string, unknown>;
 const FONT_STACKS = {
   mono: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace",
   rounded:
-    "ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, sans-serif",
+    "ui-rounded, -apple-system-rounded, 'SF Pro Rounded', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
   serif: "ui-serif, Georgia, 'Times New Roman', serif",
 } as const;
+
+function ensureRuntimeAppearanceStyle(): void {
+  let style = document.getElementById(RUNTIME_STYLE_ID) as HTMLStyleElement | null;
+
+  if (!style) {
+    style = document.createElement("style");
+    style.id = RUNTIME_STYLE_ID;
+    document.head.append(style);
+  }
+
+  style.textContent = `
+html,
+body,
+#root,
+#root .vellix-editor-shell,
+#root .vellix-editor-page,
+#root .bn-container,
+#root .bn-default-styles,
+#root .bn-editor,
+#root .ProseMirror,
+#root .bn-block,
+#root .bn-block-content,
+#root .bn-inline-content,
+#root [data-inline-content],
+#root .bn-default-styles *,
+#root .ProseMirror * {
+  font-family: var(--vellix-font-family) !important;
+}
+
+#root .vellix-editor-shell svg,
+#root .vellix-editor-shell svg * {
+  color: #fff !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+#root .vellix-editor-shell [data-vellix-icon],
+#root .vellix-editor-shell .vellix-icon,
+#root .vellix-editor-shell [data-vellix-icon] img,
+#root .vellix-editor-shell .vellix-icon img {
+  color: #fff !important;
+  filter: brightness(0) invert(1);
+}
+`;
+}
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -71,6 +117,7 @@ export function applyAppearance(
 ): EditorAppearance {
   const appearance = normalizeAppearance(payload);
   const style = document.documentElement.style;
+  ensureRuntimeAppearanceStyle();
 
   if (appearance.textColor) {
     style.setProperty("--vellix-primary-text", appearance.textColor);
@@ -96,6 +143,8 @@ export function applyAppearance(
 }
 
 export function applyStoredAppearance(): void {
+  ensureRuntimeAppearanceStyle();
+
   try {
     const raw = localStorage.getItem(APPEARANCE_STORAGE_KEY);
     if (!raw) {
@@ -107,4 +156,34 @@ export function applyStoredAppearance(): void {
   } catch {
     /* Ignore corrupt or unavailable persisted appearance. */
   }
+}
+
+export function reinforceEditorAppearance(): void {
+  ensureRuntimeAppearanceStyle();
+
+  document
+    .querySelectorAll<HTMLElement>(
+      [
+        "html",
+        "body",
+        "#root",
+        ".vellix-editor-shell",
+        ".vellix-editor-page",
+        ".bn-container",
+        ".bn-default-styles",
+        ".bn-editor",
+        ".ProseMirror",
+        ".bn-block",
+        ".bn-block-content",
+        ".bn-inline-content",
+        "[data-inline-content]",
+      ].join(","),
+    )
+    .forEach((element) => {
+      element.style.setProperty(
+        "font-family",
+        "var(--vellix-font-family)",
+        "important",
+      );
+    });
 }

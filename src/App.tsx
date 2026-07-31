@@ -6,7 +6,7 @@ import type { Block, PartialBlock } from "@blocknote/core";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/ariakit/style.css";
 
-import { applyAppearance } from "./appearance";
+import { applyAppearance, reinforceEditorAppearance } from "./appearance";
 import { sendToNative } from "./NativeBridge";
 import type { NativeMessage } from "./NativeBridge";
 
@@ -182,6 +182,8 @@ function App() {
      meaningful block rather than the full viewport.
     */
     function reportContentHeight(): void {
+      reinforceEditorAppearance();
+
       const page = document.querySelector<HTMLElement>(".vellix-editor-page");
       const editorEl = document.querySelector<HTMLElement>(".bn-editor");
       const outers = blockOuters();
@@ -568,6 +570,26 @@ function App() {
     const resizeObserver = new ResizeObserver(() => reportContentHeight());
     resizeObserver.observe(document.documentElement);
 
+    let appearanceFrame: number | undefined;
+    function scheduleAppearanceReinforcement(): void {
+      if (appearanceFrame !== undefined) {
+        return;
+      }
+
+      appearanceFrame = requestAnimationFrame(() => {
+        appearanceFrame = undefined;
+        reinforceEditorAppearance();
+      });
+    }
+
+    const mutationObserver = new MutationObserver(
+      scheduleAppearanceReinforcement,
+    );
+    mutationObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerup", onPointerUp, true);
@@ -596,6 +618,7 @@ function App() {
               blocks as unknown as PartialBlock[],
             );
             selectionRef.current.clear();
+            reinforceEditorAppearance();
             scheduleContentHeightReports({ waitForInitialAppearance: true });
             break;
           }
@@ -632,6 +655,7 @@ function App() {
             const payload = (message.payload ?? {}) as Record<string, unknown>;
             hasReceivedAppearanceRef.current = true;
             applyAppearance(payload);
+            reinforceEditorAppearance();
             scheduleContentHeightReports();
             break;
           }
@@ -805,6 +829,7 @@ function App() {
      layout settles.
     */
     scheduleContentHeightReports();
+    reinforceEditorAppearance();
 
     return () => {
       delete window.receiveNativeMessage;
@@ -812,7 +837,11 @@ function App() {
         window.clearTimeout(saveTimerRef.current);
       }
       window.clearTimeout(focusTimerRef.current);
+      if (appearanceFrame !== undefined) {
+        cancelAnimationFrame(appearanceFrame);
+      }
       resizeObserver.disconnect();
+      mutationObserver.disconnect();
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("pointermove", onPointerMove, true);
       document.removeEventListener("pointerup", onPointerUp, true);
