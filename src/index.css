@@ -1,0 +1,281 @@
+:root {
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  color: #f7f7f7;
+  background: #000000;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --vellix-background: #000000;
+  --vellix-page-background: #000000;
+  --vellix-primary-text: #f7f7f7;
+  --vellix-secondary-text: #a3a3a3;
+  --vellix-editor-width: 780px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: var(--vellix-background);
+}
+
+body {
+  min-height: 100vh;
+  background: var(--vellix-background);
+  color: var(--vellix-primary-text);
+  overflow-x: hidden;
+  overscroll-behavior: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.vellix-editor-shell {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--vellix-background);
+}
+
+.vellix-editor-page {
+  width: min(
+    100%,
+    var(--vellix-editor-width)
+  );
+
+  min-height: 100vh;
+  margin: 0 auto;
+  padding:
+    56px
+    32px
+    180px;
+}
+
+/*
+ BlockNote editor surface
+*/
+
+.bn-container {
+  color: var(--vellix-primary-text);
+  background: transparent;
+}
+
+.bn-editor {
+  min-height: calc(100vh - 236px);
+  padding: 0;
+  background: transparent;
+  color: var(--vellix-primary-text);
+}
+
+/*
+ Text and blocks
+*/
+
+.bn-block-content {
+  color: var(--vellix-primary-text);
+}
+
+.bn-inline-content {
+  color: inherit;
+}
+
+.bn-block-content[data-content-type="paragraph"] {
+  line-height: 1.65;
+}
+
+.bn-block-content[data-content-type="heading"] {
+  letter-spacing: -0.025em;
+}
+
+/*
+ Placeholder text
+*/
+
+.bn-inline-content:has(
+    > .ProseMirror-trailingBreak:only-child
+  )::before {
+  color: var(--vellix-secondary-text);
+}
+
+/*
+ Selection
+*/
+
+::selection {
+  background: rgb(128 0 254 / 35%);
+}
+
+/*
+ Links
+*/
+
+.bn-editor a {
+  color: #00dbff;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/*
+ Mobile and narrow windows
+*/
+
+@media (max-width: 700px) {
+  .vellix-editor-page {
+    padding:
+      28px
+      18px
+      140px;
+  }
+}
+/* ==========================================================================
+   Carried over from the shipped VellixEditor bundle (was hand-edited directly
+   in compiled CSS; reconciled back into source on 2026-07-30). These layer on
+   top of the base rules above: appearance vars, block styling, height
+   neutralizers, and the swipe-to-select selection UI.
+   ========================================================================== */
+
+:root{--vellix-font-family:'SF Pro Rounded',Inter,-apple-system,BlinkMacSystemFont,sans-serif;--vellix-page-background:#202020}
+.vellix-editor-shell{background:transparent!important}
+.vellix-editor-page{background:var(--vellix-page-background)!important;border-radius:0;color:var(--vellix-primary-text)!important;font-family:var(--vellix-font-family)!important;min-height:100%;padding:0!important;width:100%!important}
+.bn-default-styles,.bn-editor,.bn-block-content{font-family:var(--vellix-font-family)!important}
+.bn-editor{min-height:520px!important;color:var(--vellix-primary-text)!important;font-size:18px;line-height:1.68}
+.bn-block-content,.bn-inline-content{color:var(--vellix-primary-text)!important}
+.bn-block-content[data-content-type=heading]{font-family:var(--vellix-font-family)!important;font-weight:800;letter-spacing:0}
+.bn-block-content[data-content-type=quote]{border:1px solid #ffffff1f;background:#ffffff12;border-radius:18px;margin:14px 0;padding:16px 18px!important}
+.bn-block-content[data-content-type=quote] blockquote{border-left:0;color:var(--vellix-primary-text);margin:0;padding-left:0}
+.bn-block-content[data-content-type=pageBreak]>div{height:54px!important;border:1px solid #ffffff14!important;border-top:1px solid #ffffff14!important;border-radius:28px;background:#20202080;box-shadow:0 12px 28px #00000029;margin:20px 0!important}
+.bn-block-content[data-content-type=divider] hr{border:0!important;border-top:1px solid #ffffff1a!important;margin:18px 0!important}
+.bn-block-outer:has(.bn-inline-content:only-child){min-height:20px}
+.bn-inline-content{caret-color:var(--vellix-primary-text)}
+html,body,#root,.vellix-editor-shell,.vellix-editor-page{background:transparent!important}
+.vellix-editor-shell{min-height:auto!important}
+.vellix-editor-page{min-height:auto!important;width:100%!important;margin:0!important;padding:0!important;overflow:visible!important}
+.bn-container,.bn-editor,.ProseMirror{background:transparent!important}
+.bn-editor{min-height:220px!important;color:var(--vellix-primary-text)!important;font-size:16px!important;line-height:1.55!important;padding:0!important}
+.bn-default-styles{font-size:16px!important}
+.bn-block-content{padding:2px 0!important}
+.bn-inline-content:has(>.ProseMirror-trailingBreak:only-child):before{font-size:16px!important}
+.bn-block-content[data-content-type=heading]{letter-spacing:0!important}
+@media (max-width:700px){.bn-editor,.bn-default-styles{font-size:16px!important}.bn-block-content[data-content-type=heading]{font-size:1.45em!important}.bn-block-content[data-content-type=paragraph]{line-height:1.5!important}.bn-block-content[data-content-type=pageBreak]>div{height:32px!important;margin:12px 0!important}}
+html,body,#root{height:auto!important;min-height:0!important;overflow:visible!important}
+.vellix-editor-shell,.vellix-editor-page{height:auto!important;min-height:0!important;overflow:visible!important}
+.bn-container,.bn-editor,.ProseMirror{height:auto!important;min-height:0!important;overflow:visible!important}
+.bn-editor{padding-bottom:8px!important}
+.vellix-editor-page .bn-editor{min-height:0!important;padding-bottom:2px!important}
+
+@media (max-width:700px){.bn-editor,.bn-default-styles{font-size:15px!important}.bn-block-content{padding:1px 0!important}.bn-block-content[data-content-type=heading]{font-size:1.32em!important}.bn-block-content[data-content-type=paragraph]{line-height:1.46!important}}
+
+.vellix-editor-page .bn-block-outer,
+.vellix-editor-page .bn-block,
+.vellix-editor-page .bn-block-content {
+  transition: none !important;
+}
+
+.vellix-has-user-content .bn-trailing-block{display:none!important;height:0!important;margin:0!important;padding:0!important}
+.vellix-has-user-content .bn-block-content:has(.ProseMirror-trailingBreak:only-child):after{content:none!important;display:none!important}
+.vellix-has-user-content .bn-block-outer:has(.bn-block-content .ProseMirror-trailingBreak:only-child){min-height:0!important}
+
+html:not(.vellix-selection-mode) .bn-editor,
+html:not(.vellix-selection-mode) .bn-block-content,
+html:not(.vellix-selection-mode) .bn-inline-content,
+html:not(.vellix-selection-mode) [data-inline-content] {
+  -webkit-user-select: text !important;
+  touch-action: pan-y !important;
+  user-select: text !important;
+}
+
+.bn-editor,
+.bn-block-outer,
+.bn-block,
+.bn-block-content,
+.bn-inline-content {
+  touch-action: pan-y;
+}
+
+/* Swipe drag is the only selection animation. It moves the wrapper only while
+   the finger is pulling; committed selection itself is paint-only. */
+.vellix-dragging-block {
+  transform: translateX(var(--vellix-drag-x, 0px)) !important;
+  transition: none !important;
+}
+
+/* Selection mode is paint-only. Do not alter BlockNote content width, padding,
+   flex, min-height, or max-width here; those changes rewrap multiline blocks. */
+.vellix-selection-mode .bn-block-outer > .bn-block {
+  background: transparent !important;
+  box-shadow: none !important;
+  isolation: isolate !important;
+  position: relative !important;
+}
+
+.vellix-selection-mode .vellix-selected-block .bn-block-content,
+.vellix-selection-mode [data-vellix-selected="true"] .bn-block-content {
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.vellix-selection-mode .vellix-selected-block > .bn-block::before,
+.vellix-selection-mode [data-vellix-selected="true"] > .bn-block::before {
+  background: #0d5668 !important;
+  border-radius: 8px !important;
+  box-shadow: inset 0 0 0 1px rgb(46 203 255 / 20%) !important;
+  content: "" !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: -1 !important;
+}
+
+.vellix-selection-mode .bn-block-outer > .bn-block::after {
+  background: transparent !important;
+  border: 3px solid #202020 !important;
+  border-radius: 50% !important;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%) !important;
+  content: "" !important;
+  height: 20px !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  right: 6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 20px !important;
+}
+
+.vellix-selection-mode .vellix-selected-block > .bn-block::after,
+.vellix-selection-mode [data-vellix-selected="true"] > .bn-block::after {
+  background: #2ecbff !important;
+  border-color: #2ecbff !important;
+  box-shadow: none !important;
+}
+
+.vellix-selection-mode .vellix-selected-block .bn-inline-content,
+.vellix-selection-mode [data-vellix-selected="true"] .bn-inline-content,
+.vellix-selection-mode .vellix-selected-block [data-inline-content],
+.vellix-selection-mode [data-vellix-selected="true"] [data-inline-content] {
+  color: #fff !important;
+}
+
+.vellix-selection-mode .bn-block-content[data-content-type=divider] hr{border-top-color:#ffffff80!important}
+.vellix-selection-mode .vellix-selected-block .bn-block-content[data-content-type=divider] hr{border-top-color:#b7f2ff!important}
