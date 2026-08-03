@@ -29,9 +29,9 @@
     sans-serif;
   --vellix-selection-fill: #0d5668;
   --vellix-selection-dot: #2ecbff;
-  --vellix-icon-chevright: url("/vellix-icons/chevright.svg");
-  --vellix-icon-chevdown: url("/vellix-icons/chevdown.svg");
-  --vellix-icon-chevup: url("/vellix-icons/chevup.svg");
+  --vellix-icon-chevright: url("/asset-icons/chevright.png");
+  --vellix-icon-chevdown: url("/asset-icons/chevdown.png");
+  --vellix-icon-chevup: url("/asset-icons/chevup.png");
 }
 
 * {
@@ -120,14 +120,17 @@ select {
 
 .bn-block-outer {
   position: relative;
+  width: 100%;
 }
 
 .bn-block {
   position: relative;
   isolation: isolate;
+  width: 100%;
 }
 
 .bn-block-content {
+  width: 100%;
   padding: 2px 0 !important;
   color: var(--vellix-primary-text) !important;
 }
@@ -179,20 +182,22 @@ select {
   font-size: 16px !important;
 }
 
-.vellix-has-user-content .bn-trailing-block,
-.vellix-has-user-content
-  .bn-block-outer:has(.bn-block-content .ProseMirror-trailingBreak:only-child) {
+/*
+ Keep the active empty paragraph renderable for the caret, but do not show
+ BlockNote's trailing placeholder after the document already has user content.
+*/
+.vellix-has-user-content .bn-trailing-block .bn-inline-content::before,
+.vellix-has-user-content .bn-trailing-block [data-inline-content]::before {
   display: none !important;
+  content: none !important;
+}
+
+.vellix-has-user-content:not(.vellix-editor-focused) .bn-trailing-block {
+  overflow: hidden !important;
   height: 0 !important;
   min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
-}
-
-.vellix-has-user-content
-  .bn-block-content:has(.ProseMirror-trailingBreak:only-child)::after {
-  display: none !important;
-  content: none !important;
 }
 
 html:not(.vellix-selection-mode) .bn-editor,
@@ -236,6 +241,9 @@ html:not(.vellix-selection-mode) [data-inline-content] {
 
 /* Callout keeps the frosty translucent card and exposes its icon as a button. */
 .bn-block-content[data-content-type="callout"] {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
   padding: 6px 0 !important;
 }
 
@@ -244,6 +252,8 @@ html:not(.vellix-selection-mode) [data-inline-content] {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  width: 100%;
+  max-width: none;
   margin: 12px 0;
   padding: 14px 16px;
   background: color-mix(in srgb, var(--vellix-callout-color) 16%, transparent);
@@ -307,11 +317,6 @@ html:not(.vellix-selection-mode) [data-inline-content] {
   min-width: 0;
   padding-top: 5px;
   color: var(--vellix-primary-text);
-}
-
-.vellix-callout-text:empty::before {
-  color: var(--vellix-secondary-text);
-  content: "Callout";
 }
 
 /* Checklist should look like Craft-style hollow round circles, not squares. */
@@ -453,12 +458,6 @@ html:not(.vellix-selection-mode) [data-inline-content] {
   filter: brightness(0) invert(1);
 }
 
-/* Swipe drag is the only selection animation. Committed selection is paint-only. */
-.vellix-dragging-block {
-  transform: translateX(var(--vellix-drag-x, 0px)) !important;
-  transition: none !important;
-}
-
 .vellix-selection-mode .bn-editor {
   -webkit-user-select: none !important;
   user-select: none !important;
@@ -487,7 +486,7 @@ html:not(.vellix-selection-mode) [data-inline-content] {
 .vellix-selection-mode .vellix-selected-block::before,
 .vellix-selection-mode [data-vellix-selected="true"]::before {
   position: absolute;
-  inset: 0;
+  inset: 0 30px 0 0;
   z-index: -1;
   pointer-events: none;
   background: var(--vellix-selection-fill);

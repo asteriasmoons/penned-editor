@@ -13,30 +13,6 @@ import type { NativeMessage } from "./NativeBridge";
 
 const SAVE_DELAY_MS = 500;
 
-/*
- Horizontal distance (in points) a finger must travel left across a block
- before that block is toggled into the selection.
-*/
-const SWIPE_TRIGGER_DISTANCE = -42;
-
-/*
- The block visually follows the finger up to this far while dragging.
-*/
-const SWIPE_MAX_DRAG_DISTANCE = -58;
-
-/*
- If the finger drifts vertically more than this, treat the gesture as a
- scroll / text interaction instead of a swipe-to-select.
-*/
-const SWIPE_VERTICAL_TOLERANCE = 54;
-
-/*
- Once a horizontal-left drag passes this many points we treat the gesture as a
- swipe and capture the pointer, so the browser can no longer hand it to text
- selection or scrolling.
-*/
-const SWIPE_ACTIVATION_DISTANCE = -18;
-
 const editorSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
@@ -54,17 +30,6 @@ type SelectedBlockType =
   | "quote"
   | "toggleListItem";
 
-interface SwipeState {
-  blockId: string;
-  x: number;
-  y: number;
-  block: HTMLElement;
-  pointerId: number;
-  lastDx: number;
-  lastDyAbs: number;
-  active: boolean;
-}
-
 function App() {
   const editor = useCreateBlockNote({
     schema: editorSchema,
@@ -76,7 +41,6 @@ function App() {
 
   const saveTimerRef = useRef<number | undefined>(undefined);
   const selectionRef = useRef<Set<string>>(new Set());
-  const swipeRef = useRef<SwipeState | null>(null);
   const focusTimerRef = useRef<number | undefined>(undefined);
   const hasReceivedAppearanceRef = useRef(false);
   const lastSelectionCountRef = useRef<number | undefined>(undefined);
@@ -170,6 +134,46 @@ function App() {
       );
     }
 
+    function editorHasFocus(): boolean {
+      const active = document.activeElement as HTMLElement | null;
+      return !!active?.closest?.(".bn-editor");
+    }
+
+    function setEditorClassState(): void {
+      const focused = editorHasFocus();
+      const authored = hasUserContent();
+
+      document.documentElement.classList.toggle(
+        "vellix-editor-focused",
+        focused,
+      );
+      document.body?.classList.toggle("vellix-editor-focused", focused);
+      document.documentElement.classList.toggle(
+        "vellix-has-user-content",
+        authored,
+      );
+      document.body?.classList.toggle("vellix-has-user-content", authored);
+    }
+
+    function toggleBlockSelection(blockId: string): void {
+      if (!editor.getBlock(blockId)) {
+        return;
+      }
+
+      if (selectionRef.current.has(blockId)) {
+        selectionRef.current.delete(blockId);
+      } else {
+        selectionRef.current.add(blockId);
+      }
+
+      if (selectionRef.current.size > 0) {
+        blurEditor();
+      }
+
+      applySelectionState();
+      sendToNative("requestHaptic", { style: "light" });
+    }
+
     /*
      Reflect the current selection state into the DOM: selection-mode flags,
      per-block highlight classes, and notify native of the selected count.
@@ -177,25 +181,24 @@ function App() {
     function applySelectionState(): void {
       const outers = blockOuters();
       const inSelectionMode = selectionRef.current.size > 0;
-      const authored = hasUserContent();
+      setEditorClassState();
+      editor.isEditable = !inSelectionMode;
 
       document.documentElement.classList.toggle(
         "vellix-selection-mode",
         inSelectionMode,
       );
       document.body?.classList.toggle("vellix-selection-mode", inSelectionMode);
-      document.documentElement.classList.toggle(
-        "vellix-has-user-content",
-        authored,
-      );
-      document.body?.classList.toggle("vellix-has-user-content", authored);
 
       outers.forEach((outer) => {
         const blockId = outer.dataset.id;
         const selected = blockId ? selectionRef.current.has(blockId) : false;
+        const selectedValue = selected ? "true" : "false";
 
         outer.classList.toggle("vellix-selected-block", selected);
-        outer.setAttribute("data-vellix-selected", selected ? "true" : "false");
+        if (outer.getAttribute("data-vellix-selected") !== selectedValue) {
+          outer.setAttribute("data-vellix-selected", selectedValue);
+        }
         outer
           .querySelectorAll(
             ":scope .bn-block-content, :scope .react-renderer > .bn-block-content",
@@ -215,32 +218,23 @@ function App() {
 
     /*
      Measure the true height of the authored content and report it to native.
-     Native sizes its container to this value, so it must stop at the last
-     meaningful block rather than the full viewport.
+     Native sizes its container to this value, so measure visible block boxes
+     without mutating selection state during the measurement pass.
     */
     function reportContentHeight(): void {
       reinforceEditorAppearance();
+      setEditorClassState();
 
       const page = document.querySelector<HTMLElement>(".vellix-editor-page");
-      const editorEl = document.querySelector<HTMLElement>(".bn-editor");
       const outers = blockOuters();
-      const authored = hasUserContent();
-
-      const meaningful = outers.filter((outer) => {
-        if (!authored) {
-          return true;
-        }
-        const blockId = outer.dataset.id;
-        const block = blockId ? editor.getBlock(blockId) : undefined;
-        return !!(
-          block &&
-          (firstText([block]) ||
-            block.type !== "paragraph" ||
-            (Array.isArray(block.children) && block.children.length > 0))
+      const measured = outers.filter((outer) => {
+        const style = window.getComputedStyle(outer);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          outer.getClientRects().length > 0
         );
       });
-
-      const measured = meaningful.length ? meaningful : outers;
       let height = 60;
 
       if (page && measured.length > 0) {
@@ -249,11 +243,6 @@ function App() {
           ...measured.map((el) => el.getBoundingClientRect().bottom),
         );
         height = Math.max(60, Math.ceil(bottom - top + 2));
-      } else if (editorEl) {
-        height = Math.max(
-          60,
-          Math.ceil(editorEl.getBoundingClientRect().height + 2),
-        );
       }
 
       /*
@@ -266,7 +255,6 @@ function App() {
         lastReportedHeightRef.current = height;
         sendToNative("contentHeightChanged", { height });
       }
-      applySelectionState();
     }
 
     reportHeightRef.current = reportContentHeight;
@@ -591,26 +579,7 @@ function App() {
       deleteSelected();
     }
 
-    // MARK: - Swipe-to-select gesture
-
-    function clearDragVisual(): void {
-      if (swipeRef.current?.block) {
-        swipeRef.current.block.classList.remove("vellix-dragging-block");
-        swipeRef.current.block.style.removeProperty("--vellix-drag-x");
-      }
-    }
-
-    /*
-     Swipe-to-select uses Pointer Events, not Touch Events. A horizontal drag
-     over editable text competes with the browser's native text-selection
-     gesture, which steals the touch stream (only the first move is delivered,
-     no end fires). Pointer Events let us setPointerCapture once we recognise a
-     left swipe, which hands the whole gesture to us so selection is reliable.
-    */
     function onPointerDown(event: PointerEvent): void {
-      if (event.pointerType !== "touch") {
-        return;
-      }
       const target = event.target as HTMLElement;
       if (
         target.closest?.(
@@ -619,6 +588,7 @@ function App() {
       ) {
         return;
       }
+
       const block = target.closest?.(".bn-block-outer") as HTMLElement | null;
       if (!block) {
         return;
@@ -627,112 +597,17 @@ function App() {
       if (!blockId || !editor.getBlock(blockId)) {
         return;
       }
-      swipeRef.current = {
-        blockId,
-        x: event.clientX,
-        y: event.clientY,
-        block,
-        pointerId: event.pointerId,
-        lastDx: 0,
-        lastDyAbs: 0,
-        active: false,
-      };
-    }
 
-    function onPointerMove(event: PointerEvent): void {
-      const swipe = swipeRef.current;
-      if (!swipe || event.pointerId !== swipe.pointerId) {
-        return;
-      }
-      const dx = event.clientX - swipe.x;
-      const dyAbs = Math.abs(event.clientY - swipe.y);
-      const horizontalAbs = Math.abs(dx);
-      swipe.lastDx = dx;
-      swipe.lastDyAbs = dyAbs;
-
-      if (!swipe.active && dyAbs > 8 && dyAbs > horizontalAbs) {
-        clearDragVisual();
-        swipeRef.current = null;
+      const rect = block.getBoundingClientRect();
+      const inSelectionRail =
+        event.clientX >= rect.right - 44 && event.clientX <= rect.right + 12;
+      if (!inSelectionRail) {
         return;
       }
 
-      if (
-        !swipe.active &&
-        dx < SWIPE_ACTIVATION_DISTANCE &&
-        dyAbs < SWIPE_VERTICAL_TOLERANCE &&
-        horizontalAbs > dyAbs * 1.25
-      ) {
-        /*
-         Clearly a left swipe now: capture the pointer so the browser can no
-         longer hand it to text selection or scrolling. Vertical drags never
-         reach here (touch-action: pan-y scrolls them natively), so scrolling
-         still works.
-        */
-        swipe.active = true;
-        try {
-          swipe.block.setPointerCapture(swipe.pointerId);
-        } catch {
-          /* capture can fail if the pointer already ended */
-        }
-      }
-
-      if (swipe.active) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-
-      if (dx < 0 && dyAbs < SWIPE_VERTICAL_TOLERANCE && horizontalAbs > dyAbs) {
-        const offset = Math.max(SWIPE_MAX_DRAG_DISTANCE, Math.min(0, dx));
-        swipe.block.classList.add("vellix-dragging-block");
-        swipe.block.style.setProperty("--vellix-drag-x", `${offset}px`);
-      }
-    }
-
-    function commitSwipe(dx: number, dyAbs: number, blockId: string): void {
-      clearDragVisual();
-
-      if (dx < SWIPE_TRIGGER_DISTANCE && dyAbs < SWIPE_VERTICAL_TOLERANCE) {
-        if (selectionRef.current.has(blockId)) {
-          selectionRef.current.delete(blockId);
-        } else {
-          selectionRef.current.add(blockId);
-        }
-        /*
-         One quick native haptic per swipe-toggle. iOS WKWebView has no
-         navigator.vibrate, so Swift fires the taptic engine for us.
-        */
-        sendToNative("requestHaptic", { style: "light" });
-        if (selectionRef.current.size > 0) {
-          blurEditor();
-        }
-        reportContentHeight();
-      }
-    }
-
-    function onPointerUp(event: PointerEvent): void {
-      const swipe = swipeRef.current;
-      if (!swipe || event.pointerId !== swipe.pointerId) {
-        return;
-      }
-      commitSwipe(
-        event.clientX - swipe.x,
-        Math.abs(event.clientY - swipe.y),
-        swipe.blockId,
-      );
-      swipeRef.current = null;
-    }
-
-    /*
-     If the gesture is cut short, still commit using the last movement we saw
-     so an in-progress swipe selects rather than being silently dropped.
-    */
-    function onPointerCancel(event: PointerEvent): void {
-      const swipe = swipeRef.current;
-      if (!swipe || event.pointerId !== swipe.pointerId) {
-        return;
-      }
-      commitSwipe(swipe.lastDx, swipe.lastDyAbs, swipe.blockId);
-      swipeRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleBlockSelection(blockId);
     }
 
     function onFocusIn(event: FocusEvent): void {
@@ -746,6 +621,8 @@ function App() {
         if (selectionRef.current.size === 0) {
           sendToNative("editorFocusChanged", { focused: true });
         }
+        setEditorClassState();
+        window.setTimeout(reportContentHeight, 40);
       }
     }
 
@@ -754,7 +631,9 @@ function App() {
       focusTimerRef.current = window.setTimeout(() => {
         const active = document.activeElement as HTMLElement | null;
         if (!active?.closest?.(".bn-editor")) {
+          setEditorClassState();
           sendToNative("editorFocusChanged", { focused: false });
+          window.setTimeout(reportContentHeight, 40);
         }
       }, 80);
     }
@@ -791,20 +670,22 @@ function App() {
     });
     resizeObserver.observe(document.documentElement);
 
-    let appearanceFrame: number | undefined;
-    function scheduleAppearanceReinforcement(): void {
-      if (appearanceFrame !== undefined) {
+    let syncFrame: number | undefined;
+    function scheduleEditorDOMSync(): void {
+      if (syncFrame !== undefined) {
         return;
       }
 
-      appearanceFrame = requestAnimationFrame(() => {
-        appearanceFrame = undefined;
+      syncFrame = requestAnimationFrame(() => {
+        syncFrame = undefined;
         reinforceEditorAppearance();
+        applySelectionState();
+        reportContentHeight();
       });
     }
 
     const mutationObserver = new MutationObserver(
-      scheduleAppearanceReinforcement,
+      scheduleEditorDOMSync,
     );
     mutationObserver.observe(document.documentElement, {
       childList: true,
@@ -812,9 +693,6 @@ function App() {
     });
 
     document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("pointermove", onPointerMove, true);
-    document.addEventListener("pointerup", onPointerUp, true);
-    document.addEventListener("pointercancel", onPointerCancel, true);
     document.addEventListener("focusin", onFocusIn, true);
     document.addEventListener("focusout", onFocusOut, true);
     document.addEventListener("beforeinput", blockEditingWhileSelecting, true);
@@ -840,6 +718,7 @@ function App() {
             );
             selectionRef.current.clear();
             reinforceEditorAppearance();
+            applySelectionState();
             scheduleContentHeightReports({ waitForInitialAppearance: true });
             break;
           }
@@ -966,24 +845,27 @@ function App() {
 
           case "insertCallout": {
             const icon = (message.payload?.icon as string | undefined) || "sparkle";
-            const text = (message.payload?.text as string | undefined) || "Callout";
+            const text = (message.payload?.text as string | undefined) || "";
             const color = (message.payload?.color as string | undefined) || "#ffffff";
             const anchor =
               editor.getTextCursorPosition?.()?.block ??
               editor.document[editor.document.length - 1];
+            const content = text.trim()
+              ? [
+                  {
+                    type: "text",
+                    text,
+                    styles: {},
+                  },
+                ]
+              : [];
             const block: Record<string, unknown> = {
               type: "callout",
               props: {
                 icon,
                 color,
               },
-              content: [
-                {
-                  type: "text",
-                  text,
-                  styles: {},
-                },
-              ],
+              content,
               children: [],
             };
             const [inserted] = editor.insertBlocks(
@@ -1108,6 +990,7 @@ function App() {
      layout settles.
     */
     scheduleContentHeightReports();
+    applySelectionState();
     reinforceEditorAppearance();
 
     return () => {
@@ -1116,8 +999,8 @@ function App() {
         window.clearTimeout(saveTimerRef.current);
       }
       window.clearTimeout(focusTimerRef.current);
-      if (appearanceFrame !== undefined) {
-        cancelAnimationFrame(appearanceFrame);
+      if (syncFrame !== undefined) {
+        cancelAnimationFrame(syncFrame);
       }
       if (resizeFrame !== undefined) {
         cancelAnimationFrame(resizeFrame);
@@ -1125,9 +1008,6 @@ function App() {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("pointermove", onPointerMove, true);
-      document.removeEventListener("pointerup", onPointerUp, true);
-      document.removeEventListener("pointercancel", onPointerCancel, true);
       document.removeEventListener("focusin", onFocusIn, true);
       document.removeEventListener("focusout", onFocusOut, true);
       document.removeEventListener(
