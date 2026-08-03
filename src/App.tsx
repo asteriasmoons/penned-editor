@@ -688,6 +688,37 @@ function App() {
 
     function onPointerDown(event: PointerEvent): void {
       const target = event.target as HTMLElement;
+      const block = target.closest?.(".bn-block-outer") as HTMLElement | null;
+
+      if (block) {
+        const blockId = block.dataset.id;
+        const callout = target.closest?.(".vellix-callout") as HTMLElement | null;
+        const editorBlock = blockId ? editor.getBlock(blockId) : undefined;
+
+        if (callout && editorBlock?.type === "callout") {
+          const rect = callout.getBoundingClientRect();
+          const inIconHitArea =
+            event.clientX >= rect.left &&
+            event.clientX <= rect.left + 58 &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.top + 58;
+
+          if (inIconHitArea) {
+            event.preventDefault();
+            event.stopPropagation();
+            sendToNative("requestCalloutIconPicker", {
+              blockId,
+              icon:
+                typeof editorBlock.props.icon === "string" &&
+                editorBlock.props.icon.trim()
+                  ? editorBlock.props.icon.trim()
+                  : "sparkle",
+            });
+            return;
+          }
+        }
+      }
+
       if (
         target.closest?.(
           "button, input, textarea, select, a, [data-vellix-editor-control], .bn-toggle-button, .bn-toggle-add-block-button",
@@ -696,7 +727,6 @@ function App() {
         return;
       }
 
-      const block = target.closest?.(".bn-block-outer") as HTMLElement | null;
       if (!block) {
         return;
       }
