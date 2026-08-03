@@ -107,8 +107,9 @@ export const calloutBlockSpec = createReactBlockSpec(
           data-callout-color={color}
           style={{ "--vellix-callout-color": color } as CSSProperties}
         >
-          <button
-            type="button"
+          <span
+            role="button"
+            tabIndex={-1}
             className="vellix-callout-icon"
             aria-label="Change callout icon"
             data-vellix-icon
@@ -133,7 +134,7 @@ export const calloutBlockSpec = createReactBlockSpec(
             }}
           >
             {calloutIconElement(icon)}
-          </button>
+          </span>
           <div className="vellix-callout-text" ref={props.contentRef} />
         </div>
       );

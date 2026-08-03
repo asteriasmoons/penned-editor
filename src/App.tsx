@@ -30,6 +30,111 @@ type SelectedBlockType =
   | "quote"
   | "toggleListItem";
 
+type RawBlock = Record<string, unknown>;
+type RawInlineContent = Array<Record<string, unknown>>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function textNode(text: string): Record<string, unknown> {
+  return {
+    type: "text",
+    text,
+    styles: {},
+  };
+}
+
+function normalizeInlineContent(content: unknown): RawInlineContent {
+  if (typeof content === "string") {
+    return content.trim() ? [textNode(content)] : [];
+  }
+
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  return content
+    .map((node) => {
+      if (!isRecord(node)) {
+        return null;
+      }
+
+      if (node.type === "text") {
+        return {
+          type: "text",
+          text: typeof node.text === "string" ? node.text : "",
+          styles: isRecord(node.styles) ? node.styles : {},
+        };
+      }
+
+      return node;
+    })
+    .filter((node): node is Record<string, unknown> => node !== null);
+}
+
+function blockText(block: RawBlock): string {
+  return normalizeInlineContent(block.content)
+    .map((node) => (typeof node.text === "string" ? node.text : ""))
+    .join("");
+}
+
+function normalizeEditorBlock(value: unknown): RawBlock {
+  if (!isRecord(value)) {
+    return {
+      type: "paragraph",
+      props: {},
+      content: [],
+      children: [],
+    };
+  }
+
+  const type = typeof value.type === "string" ? value.type : "paragraph";
+  const props = isRecord(value.props) ? { ...value.props } : {};
+  const children = Array.isArray(value.children)
+    ? value.children.map(normalizeEditorBlock)
+    : [];
+
+  if (type === "callout") {
+    return {
+      ...value,
+      type: "callout",
+      props: {
+        icon:
+          typeof props.icon === "string" && props.icon.trim()
+            ? props.icon.trim()
+            : "sparkle",
+        color:
+          typeof props.color === "string" && props.color.trim()
+            ? props.color.trim()
+            : "#ffffff",
+      },
+      content: normalizeInlineContent(value.content),
+      children,
+    };
+  }
+
+  if (typeof value.type !== "string") {
+    return {
+      ...value,
+      type: "paragraph",
+      props,
+      content: normalizeInlineContent(value.content),
+      children,
+    };
+  }
+
+  return {
+    ...value,
+    props,
+    children,
+  };
+}
+
+function normalizeEditorBlocks(blocks: unknown[]): RawBlock[] {
+  return blocks.map(normalizeEditorBlock);
+}
+
 function App() {
   const editor = useCreateBlockNote({
     schema: editorSchema,
@@ -398,9 +503,11 @@ function App() {
             props: { color },
           } as EditorPartialBlock);
         } else {
+          const text = blockText(block as unknown as RawBlock);
           editor.updateBlock(block, {
             type: "callout",
             props: { icon: "sparkle", color },
+            content: normalizeInlineContent(text),
           } as unknown as EditorPartialBlock);
         }
       });
@@ -712,9 +819,10 @@ function App() {
             if (!Array.isArray(blocks)) {
               throw new Error("loadDocument requires a blocks array.");
             }
+            const normalizedBlocks = normalizeEditorBlocks(blocks);
             editor.replaceBlocks(
               editor.document,
-              blocks as unknown as EditorInsertBlocks,
+              normalizedBlocks as unknown as EditorInsertBlocks,
             );
             selectionRef.current.clear();
             reinforceEditorAppearance();
@@ -869,7 +977,7 @@ function App() {
               children: [],
             };
             const [inserted] = editor.insertBlocks(
-              [block] as unknown as EditorInsertBlocks,
+              [normalizeEditorBlock(block)] as unknown as EditorInsertBlocks,
               anchor,
               "after",
             );
