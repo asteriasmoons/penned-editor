@@ -51,8 +51,10 @@ export const calloutBlockSpec = createReactBlockSpec(
       return (
         <div
           className="vellix-callout"
+          data-vellix-callout="true"
           data-callout-icon={icon}
           data-callout-color={color}
+          tabIndex={-1}
           style={
             {
               "--vellix-callout-color": color,
@@ -60,7 +62,12 @@ export const calloutBlockSpec = createReactBlockSpec(
             } as CSSProperties
           }
         >
-          <div className="vellix-callout-text" ref={props.contentRef} />
+          <span className="vellix-callout-icon" aria-hidden="true" />
+          <div
+            className="vellix-callout-text"
+            data-vellix-callout-content="true"
+            ref={props.contentRef}
+          />
         </div>
       );
     },
@@ -71,6 +78,7 @@ export const calloutBlockSpec = createReactBlockSpec(
       return (
         <aside
           className="vellix-callout"
+          data-vellix-callout="true"
           data-callout-icon={icon}
           data-callout-color={color}
           style={
@@ -80,7 +88,12 @@ export const calloutBlockSpec = createReactBlockSpec(
             } as CSSProperties
           }
         >
-          <span ref={props.contentRef} />
+          <span className="vellix-callout-icon" aria-hidden="true" />
+          <span
+            className="vellix-callout-text"
+            data-vellix-callout-content="true"
+            ref={props.contentRef}
+          />
         </aside>
       );
     },

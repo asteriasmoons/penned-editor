@@ -147,10 +147,14 @@ function App() {
   const saveTimerRef = useRef<number | undefined>(undefined);
   const selectionRef = useRef<Set<string>>(new Set());
   const focusTimerRef = useRef<number | undefined>(undefined);
+  const deferredFocusTimerRef = useRef<number | undefined>(undefined);
   const hasReceivedAppearanceRef = useRef(false);
   const lastSelectionCountRef = useRef<number | undefined>(undefined);
+  const lastEditableRef = useRef<boolean | undefined>(undefined);
+  const lastEditorFocusRef = useRef<boolean | undefined>(undefined);
   const reportHeightRef = useRef<(() => void) | null>(null);
   const lastReportedHeightRef = useRef<number>(-1);
+  const suppressFocusUntilRef = useRef(0);
 
   useEffect(() => {
     /*
@@ -244,6 +248,61 @@ function App() {
       return !!active?.closest?.(".bn-editor");
     }
 
+    function currentTime(): number {
+      return typeof performance !== "undefined" ? performance.now() : Date.now();
+    }
+
+    function suppressEditorFocus(durationMs = 500): void {
+      suppressFocusUntilRef.current = Math.max(
+        suppressFocusUntilRef.current,
+        currentTime() + durationMs,
+      );
+    }
+
+    function isEditorFocusSuppressed(): boolean {
+      return currentTime() < suppressFocusUntilRef.current;
+    }
+
+    function queueSettledEditorFocus(): void {
+      window.clearTimeout(deferredFocusTimerRef.current);
+      const delay = Math.max(0, suppressFocusUntilRef.current - currentTime()) + 40;
+
+      deferredFocusTimerRef.current = window.setTimeout(() => {
+        if (
+          selectionRef.current.size === 0 &&
+          editorHasFocus() &&
+          !isEditorFocusSuppressed()
+        ) {
+          sendEditorFocusChanged(true);
+          setEditorClassState();
+          window.setTimeout(reportContentHeight, 40);
+        }
+      }, delay);
+    }
+
+    function setEditorEditable(editable: boolean): void {
+      if (lastEditableRef.current === editable && editor.isEditable === editable) {
+        return;
+      }
+
+      lastEditableRef.current = editable;
+      editor.isEditable = editable;
+    }
+
+    function sendEditorFocusChanged(focused: boolean): void {
+      if (focused && isEditorFocusSuppressed()) {
+        queueSettledEditorFocus();
+        return;
+      }
+
+      if (lastEditorFocusRef.current === focused) {
+        return;
+      }
+
+      lastEditorFocusRef.current = focused;
+      sendToNative("editorFocusChanged", { focused });
+    }
+
     function setEditorClassState(): void {
       const focused = editorHasFocus();
       const authored = hasUserContent();
@@ -272,7 +331,7 @@ function App() {
       }
 
       if (selectionRef.current.size > 0) {
-        blurEditor();
+        blurEditor({ suppressMs: 350 });
       }
 
       applySelectionState();
@@ -287,7 +346,7 @@ function App() {
       const outers = blockOuters();
       const inSelectionMode = selectionRef.current.size > 0;
       setEditorClassState();
-      editor.isEditable = !inSelectionMode;
+      setEditorEditable(!inSelectionMode);
 
       document.documentElement.classList.toggle(
         "vellix-selection-mode",
@@ -476,6 +535,10 @@ function App() {
       }
 
       try {
+        if (type === "callout") {
+          suppressEditorFocus(700);
+        }
+
         const update = selectedBlockUpdate(type, payload);
         blocks.forEach((block) => {
           editor.updateBlock(block, update);
@@ -497,6 +560,8 @@ function App() {
         return;
       }
 
+      suppressEditorFocus(700);
+
       blocks.forEach((block) => {
         if (block.type === "callout") {
           editor.updateBlock(block, {
@@ -516,6 +581,7 @@ function App() {
 
     function updateCalloutIcon(blockId: string | undefined, icon: string): void {
       const trimmedIcon = icon.trim() || "sparkle";
+      suppressEditorFocus(700);
 
       if (blockId) {
         const block = editor.getBlock(blockId);
@@ -567,12 +633,28 @@ function App() {
       sendDocumentChanged();
     }
 
-    function blurEditor(): void {
+    function blurEditor(options: { suppressMs?: number } = {}): void {
+      if (options.suppressMs) {
+        suppressEditorFocus(options.suppressMs);
+      }
+
       const active = document.activeElement as HTMLElement | null;
-      if (active && typeof active.blur === "function") {
+      if (active?.closest?.(".bn-editor") && typeof active.blur === "function") {
         active.blur();
       }
-      sendToNative("editorFocusChanged", { focused: false });
+      sendEditorFocusChanged(false);
+      setEditorClassState();
+    }
+
+    function requestNativeCalloutIconPicker(blockId: string, icon: string): void {
+      suppressEditorFocus(900);
+      blurEditor();
+      window.setTimeout(() => {
+        sendToNative("requestCalloutIconPicker", {
+          blockId,
+          icon,
+        });
+      }, 0);
     }
 
     function clearSelection(): void {
@@ -582,7 +664,7 @@ function App() {
 
     function selectAll(): void {
       selectionRef.current = new Set(documentBlocks().map((block) => block.id));
-      blurEditor();
+      blurEditor({ suppressMs: 350 });
       applySelectionState();
     }
 
@@ -695,7 +777,10 @@ function App() {
         const callout = target.closest?.(".vellix-callout") as HTMLElement | null;
         const editorBlock = blockId ? editor.getBlock(blockId) : undefined;
 
-        if (callout && editorBlock?.type === "callout") {
+        if (blockId && callout && editorBlock?.type === "callout") {
+          suppressEditorFocus(260);
+          queueSettledEditorFocus();
+
           const rect = callout.getBoundingClientRect();
           const inIconHitArea =
             event.clientX >= rect.left &&
@@ -706,14 +791,14 @@ function App() {
           if (inIconHitArea) {
             event.preventDefault();
             event.stopPropagation();
-            sendToNative("requestCalloutIconPicker", {
+            event.stopImmediatePropagation();
+            requestNativeCalloutIconPicker(
               blockId,
-              icon:
-                typeof editorBlock.props.icon === "string" &&
+              typeof editorBlock.props.icon === "string" &&
                 editorBlock.props.icon.trim()
-                  ? editorBlock.props.icon.trim()
-                  : "sparkle",
-            });
+                ? editorBlock.props.icon.trim()
+                : "sparkle",
+            );
             return;
           }
         }
@@ -751,12 +836,17 @@ function App() {
       const target = event.target as HTMLElement;
       if (target.closest?.(".bn-editor")) {
         window.clearTimeout(focusTimerRef.current);
+        if (isEditorFocusSuppressed()) {
+          setEditorClassState();
+          queueSettledEditorFocus();
+          return;
+        }
         if (selectionRef.current.size > 0) {
-          blurEditor();
+          blurEditor({ suppressMs: 350 });
           return;
         }
         if (selectionRef.current.size === 0) {
-          sendToNative("editorFocusChanged", { focused: true });
+          sendEditorFocusChanged(true);
         }
         setEditorClassState();
         window.setTimeout(reportContentHeight, 40);
@@ -769,7 +859,9 @@ function App() {
         const active = document.activeElement as HTMLElement | null;
         if (!active?.closest?.(".bn-editor")) {
           setEditorClassState();
-          sendToNative("editorFocusChanged", { focused: false });
+          if (!isEditorFocusSuppressed()) {
+            sendEditorFocusChanged(false);
+          }
           window.setTimeout(reportContentHeight, 40);
         }
       }, 80);
@@ -787,7 +879,7 @@ function App() {
 
       event.preventDefault();
       event.stopPropagation();
-      blurEditor();
+      blurEditor({ suppressMs: 350 });
     }
 
     /*
@@ -866,7 +958,7 @@ function App() {
             if (typeof editable !== "boolean") {
               throw new Error("setEditable requires a boolean editable value.");
             }
-            editor.isEditable = editable;
+            setEditorEditable(editable);
             break;
           }
 
@@ -982,6 +1074,7 @@ function App() {
           }
 
           case "insertCallout": {
+            suppressEditorFocus(700);
             const icon = (message.payload?.icon as string | undefined) || "sparkle";
             const text = (message.payload?.text as string | undefined) || "";
             const color = (message.payload?.color as string | undefined) || "#ffffff";
@@ -1137,6 +1230,7 @@ function App() {
         window.clearTimeout(saveTimerRef.current);
       }
       window.clearTimeout(focusTimerRef.current);
+      window.clearTimeout(deferredFocusTimerRef.current);
       if (syncFrame !== undefined) {
         cancelAnimationFrame(syncFrame);
       }
