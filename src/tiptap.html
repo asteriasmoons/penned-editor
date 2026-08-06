@@ -1,0 +1,420 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Vellix TipTap</title>
+    <style>
+      :root {
+        color: #f7f7f7;
+        background: transparent;
+        font-family:
+          ui-rounded,
+          -apple-system-rounded,
+          "SF Pro Rounded",
+          "SF Pro Display",
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        --vellix-page-background: transparent;
+        --vellix-primary-text: #f7f7f7;
+        --vellix-secondary-text: #9b9b9f;
+        --vellix-font-family:
+          ui-rounded,
+          -apple-system-rounded,
+          "SF Pro Rounded",
+          "SF Pro Display",
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          sans-serif;
+        --vellix-selection-fill: #0d5668;
+        --vellix-selection-dot: #2ecbff;
+        --vellix-icon-chevright: url("vellix-icon://asset/chevright");
+        --vellix-icon-chevdown: url("vellix-icon://asset/chevdown");
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      #editor-root {
+        width: 100%;
+        min-width: 100%;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0;
+        padding: 0;
+        background: transparent !important;
+        overflow: visible !important;
+        overscroll-behavior: none;
+      }
+
+      body {
+        color: var(--vellix-primary-text);
+        font-family: var(--vellix-font-family) !important;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      .vellix-editor-shell,
+      .vellix-editor-page {
+        width: 100%;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0;
+        padding: 0;
+        background: transparent !important;
+        color: var(--vellix-primary-text);
+        font-family: var(--vellix-font-family) !important;
+        overflow: visible !important;
+      }
+
+      .tiptap-editor,
+      .tiptap-editor *,
+      .ProseMirror,
+      .ProseMirror * {
+        font-family: var(--vellix-font-family) !important;
+      }
+
+      .tiptap-editor,
+      .ProseMirror {
+        height: auto !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+        color: var(--vellix-primary-text) !important;
+        overflow: visible !important;
+        caret-color: var(--vellix-primary-text);
+        outline: none;
+      }
+
+      .tiptap-editor {
+        font-size: 16px !important;
+        line-height: 1.52 !important;
+        padding-bottom: 1px !important;
+      }
+
+      .tiptap-editor [data-vellix-block-id] {
+        position: relative;
+        width: 100%;
+        color: var(--vellix-primary-text);
+        transition: none !important;
+        touch-action: pan-y;
+      }
+
+      .tiptap-editor p,
+      .tiptap-editor li,
+      .tiptap-editor blockquote,
+      .tiptap-editor h1,
+      .tiptap-editor h2,
+      .tiptap-editor h3,
+      .tiptap-editor h4,
+      .tiptap-editor h5,
+      .tiptap-editor h6 {
+        margin: 0;
+        padding: 2px 0;
+      }
+
+      .tiptap-editor h1,
+      .tiptap-editor h2,
+      .tiptap-editor h3,
+      .tiptap-editor h4,
+      .tiptap-editor h5,
+      .tiptap-editor h6 {
+        font-family: var(--vellix-font-family) !important;
+        font-weight: 800;
+        letter-spacing: 0 !important;
+        line-height: 1.24 !important;
+      }
+
+      .tiptap-editor h1 { font-size: 1.54em; }
+      .tiptap-editor h2 { font-size: 1.44em; }
+      .tiptap-editor h3 { font-size: 1.34em; }
+      .tiptap-editor h4,
+      .tiptap-editor h5,
+      .tiptap-editor h6 { font-size: 1.22em; }
+
+      @media (max-width: 700px) {
+        .tiptap-editor {
+          font-size: 15.5px !important;
+        }
+
+        .tiptap-editor p,
+        .tiptap-editor li,
+        .tiptap-editor blockquote,
+        .tiptap-editor h1,
+        .tiptap-editor h2,
+        .tiptap-editor h3,
+        .tiptap-editor h4,
+        .tiptap-editor h5,
+        .tiptap-editor h6 {
+          padding: 1.5px 0;
+        }
+      }
+
+      ::selection {
+        background: rgb(128 0 254 / 35%);
+      }
+
+      .tiptap-editor a {
+        color: #8fe9ff;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      .tiptap-editor blockquote {
+        position: relative;
+        margin: 10px 0 10px 2px !important;
+        padding: 4px 0 4px 16px !important;
+        color: var(--vellix-primary-text);
+        font-style: normal;
+        background: transparent !important;
+        border: 0 !important;
+      }
+
+      .tiptap-editor blockquote::before {
+        position: absolute;
+        inset: 3px auto 3px 0;
+        width: 3px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--vellix-primary-text) 62%, transparent);
+        content: "";
+      }
+
+      .vellix-callout {
+        --vellix-callout-color: #ffffff;
+        position: relative;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        width: 100%;
+        max-width: none;
+        margin: 12px 0;
+        padding: 14px 16px;
+        background: color-mix(in srgb, var(--vellix-callout-color) 16%, transparent);
+        border: 1px solid color-mix(in srgb, var(--vellix-callout-color) 30%, transparent);
+        border-radius: 18px;
+        box-shadow:
+          inset 0 1px 0 #ffffff18,
+          0 16px 36px #00000024;
+      }
+
+      .vellix-callout-icon-button {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 38px;
+        width: 38px;
+        height: 38px;
+        margin: 1px 0 0;
+        padding: 8px;
+        background: color-mix(in srgb, var(--vellix-callout-color) 22%, transparent);
+        border: 1px solid color-mix(in srgb, var(--vellix-callout-color) 38%, transparent);
+        border-radius: 14px;
+        color: #fff;
+      }
+
+      .vellix-callout-icon-image {
+        display: block;
+        width: 22px;
+        height: 22px;
+        margin: 0;
+        border-radius: 0;
+        object-fit: contain;
+      }
+
+      .vellix-callout-text {
+        flex: 1;
+        min-width: 0;
+        padding-top: 5px;
+        color: var(--vellix-primary-text);
+        outline: none;
+      }
+
+      .vellix-callout-text p {
+        margin: 0;
+      }
+
+      .vellix-callout-text p + p {
+        margin-top: 8px;
+      }
+
+      .tiptap-editor ul,
+      .tiptap-editor ol {
+        margin: 4px 0;
+        padding-left: 24px;
+      }
+
+      .tiptap-editor [data-type="taskList"] {
+        margin: 4px 0;
+        padding-left: 0;
+        list-style: none;
+      }
+
+      .tiptap-editor [data-type="taskItem"] {
+        display: flex;
+        align-items: center;
+        min-height: 24px;
+        list-style: none;
+      }
+
+      .tiptap-editor [data-type="taskItem"] > label {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 10px;
+      }
+
+      .tiptap-editor [data-type="taskItem"] input {
+        width: 19px !important;
+        min-width: 19px !important;
+        height: 19px !important;
+        margin: 0 !important;
+        appearance: none !important;
+        -webkit-appearance: none !important;
+        cursor: pointer;
+        background: transparent !important;
+        border: 2px solid color-mix(in srgb, var(--vellix-primary-text) 42%, transparent) !important;
+        border-radius: 50% !important;
+        box-shadow: none !important;
+      }
+
+      .tiptap-editor [data-type="taskItem"] input:checked {
+        background: var(--vellix-selection-dot) !important;
+        border-color: var(--vellix-selection-dot) !important;
+        box-shadow: inset 0 0 0 4px #050606 !important;
+      }
+
+      .tiptap-editor hr[data-vellix-divider] {
+        margin: 18px 0 !important;
+        border: 0 !important;
+        border-top: 1px solid #ffffff1a !important;
+      }
+
+      .tiptap-editor [data-vellix-page-break] {
+        height: 32px !important;
+        margin: 12px 0 !important;
+        background: #20202080;
+        border: 1px solid #ffffff14 !important;
+        border-radius: 28px;
+        box-shadow: 0 12px 28px #00000029;
+      }
+
+      .tiptap-editor details[data-vellix-toggle] {
+        margin: 5px 0;
+      }
+
+      .tiptap-editor details[data-vellix-toggle] > summary {
+        position: relative;
+        width: 26px;
+        height: 26px;
+        margin: 0 8px 0 0;
+        color: #fff;
+        background: rgb(255 255 255 / 7%);
+        border: 1px solid rgb(255 255 255 / 12%);
+        border-radius: 50%;
+        list-style: none;
+        cursor: pointer;
+        float: left;
+      }
+
+      .tiptap-editor details[data-vellix-toggle] > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .tiptap-editor details[data-vellix-toggle] > summary::before {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 13px;
+        height: 13px;
+        background: currentColor;
+        -webkit-mask-image: var(--vellix-icon-chevright);
+        mask-image: var(--vellix-icon-chevright);
+        -webkit-mask-position: center;
+        mask-position: center;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        transform: translate(-50%, -50%);
+        content: "";
+      }
+
+      .tiptap-editor details[data-vellix-toggle][open] > summary::before {
+        -webkit-mask-image: var(--vellix-icon-chevdown);
+        mask-image: var(--vellix-icon-chevdown);
+      }
+
+      html:not(.vellix-selection-mode) .tiptap-editor,
+      html:not(.vellix-selection-mode) .tiptap-editor [data-vellix-block-id] {
+        -webkit-user-select: text !important;
+        user-select: text !important;
+      }
+
+      .vellix-selection-mode .tiptap-editor {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+      }
+
+      .vellix-selection-mode .tiptap-editor [data-vellix-block-id]::after {
+        position: absolute;
+        top: 50%;
+        right: 6px;
+        z-index: 3;
+        width: 20px;
+        height: 20px;
+        pointer-events: none;
+        background: transparent;
+        border: 3px solid #202020;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px rgb(0 0 0 / 50%);
+        transform: translateY(-50%);
+        content: "";
+      }
+
+      .vellix-selection-mode .vellix-selected-block::before,
+      .vellix-selection-mode [data-vellix-selected="true"]::before {
+        position: absolute;
+        inset: 0 30px 0 0;
+        z-index: -1;
+        pointer-events: none;
+        background: var(--vellix-selection-fill);
+        border-radius: 8px;
+        box-shadow: inset 0 0 0 1px rgb(46 203 255 / 20%);
+        content: "";
+      }
+
+      .vellix-selection-mode .vellix-selected-block::after,
+      .vellix-selection-mode [data-vellix-selected="true"]::after {
+        background: var(--vellix-selection-dot) !important;
+        border-color: var(--vellix-selection-dot) !important;
+        box-shadow: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="editor-root" class="vellix-editor-shell">
+      <div class="vellix-editor-page">
+        <div id="editor"></div>
+      </div>
+    </main>
+    <script src="./tiptap.bundle.js"></script>
+  </body>
+</html>

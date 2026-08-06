@@ -1,5 +1,5 @@
-// Copies the freshly built `dist/` into the iOS app's VellixEditor.bundle so
-// the compiled editor and this source never drift apart again.
+// Copies the freshly built static TipTap editor into the iOS app's
+// VellixEditor.bundle so the compiled editor and this source never drift.
 //
 // Runs automatically after `npm run build`. Assumes the Xcode project lives in
 // a sibling folder: ../Vellix/Vellix/VellixEditor.bundle
@@ -43,4 +43,4 @@ for (const entry of await readdir(bundle)) {
 }
 await cp(dist, bundle, { recursive: true });
 
-console.log(`[sync-bundle] Copied dist/ -> ${bundle}`);
+console.log(`[sync-bundle] Copied dist/tiptap.html + dist/tiptap.bundle.js -> ${bundle}`);
