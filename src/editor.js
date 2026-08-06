@@ -12,6 +12,7 @@ import TaskList from "@tiptap/extension-task-list";
 
 const DEFAULT_CALLOUT_ICON = "sparkle";
 const DEFAULT_CALLOUT_COLOR = "#ffffff";
+const vellixIconAssets = new Map();
 
 function postToSwift(kind, payload = {}) {
   try {
@@ -45,11 +46,19 @@ function normalizedIconName(icon) {
 }
 
 function iconSource(icon, tint = DEFAULT_CALLOUT_COLOR, size = 22) {
+  const cleanIcon = normalizedIconName(icon);
+  const registeredSource = vellixIconAssets.get(cleanIcon);
+  if (registeredSource) return registeredSource;
+
   const params = new URLSearchParams({
     tint: String(tint || DEFAULT_CALLOUT_COLOR),
     size: String(size),
   });
-  return `vellix-icon://asset/${encodeURIComponent(normalizedIconName(icon))}?${params.toString()}`;
+  return `vellix-icon://asset/${encodeURIComponent(cleanIcon)}?${params.toString()}`;
+}
+
+function cssBackgroundImageSource(src) {
+  return `url("${String(src || "").replace(/["\\\n\r]/g, "")}")`;
 }
 
 let calloutIconProbeSerial = 0;
@@ -163,6 +172,7 @@ function canvasPixelStats(img) {
 
 function traceCalloutImageState(label, callout, img, extra = {}) {
   const button = img?.closest?.(".vellix-callout-icon-button") ?? null;
+  const isImageElement = img instanceof HTMLImageElement;
   traceDiag(label, {
     id: callout?.dataset?.vellixBlockId || null,
     icon: callout?.dataset?.calloutIcon || null,
@@ -170,11 +180,12 @@ function traceCalloutImageState(label, callout, img, extra = {}) {
     imageSerial: serialForElement(img),
     buttonSerial: serialForElement(button),
     calloutSerial: serialForElement(callout),
-    imageAlt: img?.alt || null,
+    imageAlt: img?.alt || img?.getAttribute?.("aria-label") || null,
     imageSrcAttr: img?.getAttribute?.("src") || null,
     imageSrc: img?.src || null,
     imageCurrentSrc: img?.currentSrc || null,
-    imageComplete: img?.complete ?? null,
+    imageBackgroundImage: img?.style?.backgroundImage || null,
+    imageComplete: isImageElement ? img.complete : null,
     imageHidden: img?.hidden ?? null,
     imageRect: rectSnapshot(img),
     imageStyle: styleSnapshot(img),
@@ -182,7 +193,7 @@ function traceCalloutImageState(label, callout, img, extra = {}) {
     buttonStyle: styleSnapshot(button),
     calloutRect: rectSnapshot(callout),
     calloutStyle: styleSnapshot(callout),
-    canvas: img?.complete ? canvasPixelStats(img) : { skipped: "image-not-complete" },
+    canvas: isImageElement && img.complete ? canvasPixelStats(img) : { skipped: isImageElement ? "image-not-complete" : "background-element" },
     text: callout?.textContent?.trim() ?? "",
     ...extra,
   });
@@ -447,47 +458,27 @@ function renderCalloutIcons(root = document) {
   root.querySelectorAll?.(".vellix-callout").forEach((callout) => {
     const icon = callout.dataset.calloutIcon || DEFAULT_CALLOUT_ICON;
     const color = callout.dataset.calloutColor || DEFAULT_CALLOUT_COLOR;
-    const img = callout.querySelector(".vellix-callout-icon-image");
-    if (!img) return;
+    const iconElement = callout.querySelector(".vellix-callout-icon-image");
+    if (!iconElement) return;
     const src = iconSource(icon, color, 22);
-    traceCalloutImageState("callout-dom-icon-before-src", callout, img, {
+    traceCalloutImageState("callout-dom-icon-before-src", callout, iconElement, {
       nextSrc: src,
-      previousSrc: img.getAttribute("src") || null,
+      previousSrc: iconElement.getAttribute("src") || iconElement.style.backgroundImage || null,
     });
-    img.alt = icon;
-    img.onload = () => {
-      traceDiag("callout-dom-icon-load", {
-        id: callout.dataset.vellixBlockId || null,
-        icon,
-        color,
-        imageSrc: img.currentSrc || img.src || null,
-        naturalWidth: img.naturalWidth,
-        naturalHeight: img.naturalHeight,
-      });
-      traceCalloutImageState("callout-dom-icon-load-state", callout, img);
-      scheduleCalloutImageStateProbes(callout, img, "load");
-    };
-    img.onerror = () => {
-      traceDiag("callout-dom-icon-error", {
-        id: callout.dataset.vellixBlockId || null,
-        icon,
-        color,
-        imageSrc: img.currentSrc || img.src || null,
-      });
-      traceCalloutImageState("callout-dom-icon-error-state", callout, img);
-    };
-    img.src = src;
-    img.hidden = false;
+    iconElement.setAttribute("role", "img");
+    iconElement.setAttribute("aria-label", icon);
+    iconElement.style.backgroundImage = cssBackgroundImageSource(src);
+    iconElement.hidden = false;
     traceDiag("callout-dom-icon-mounted", {
       id: callout.dataset.vellixBlockId || null,
       icon,
       color,
-      imageAlt: img.alt || null,
+      imageAlt: iconElement.getAttribute("aria-label") || null,
       imageSrc: src,
       text: callout.textContent?.trim() ?? "",
     });
-    traceCalloutImageState("callout-dom-icon-mounted-state", callout, img, { src });
-    scheduleCalloutImageStateProbes(callout, img, "mounted");
+    traceCalloutImageState("callout-dom-icon-mounted-state", callout, iconElement, { src });
+    scheduleCalloutImageStateProbes(callout, iconElement, "mounted");
   });
 }
 
@@ -592,7 +583,15 @@ const Callout = Node.create({
           "data-vellix-callout-icon-button": "true",
           "aria-label": "Change callout icon",
         },
-        ["img", { class: "vellix-callout-icon-image", alt: icon, src: iconSource(icon, color, 22) }],
+        [
+          "span",
+          {
+            class: "vellix-callout-icon-image",
+            role: "img",
+            "aria-label": icon,
+            style: `background-image:${cssBackgroundImageSource(iconSource(icon, color, 22))};`,
+          },
+        ],
       ],
       ["div", { class: "vellix-callout-text" }, 0],
     ];
@@ -617,6 +616,26 @@ const Callout = Node.create({
             { updateSelection: true },
           );
         },
+    };
+  },
+  addKeyboardShortcuts() {
+    return {
+      Enter: ({ editor }) => {
+        const { $from } = editor.state.selection;
+        for (let depth = $from.depth; depth > 0; depth -= 1) {
+          if ($from.node(depth).type.name !== "callout") continue;
+
+          const afterCallout = $from.after(depth);
+          return editor
+            .chain()
+            .focus()
+            .insertContentAt(afterCallout, paragraph(), { updateSelection: false })
+            .setTextSelection(afterCallout + 1)
+            .run();
+        }
+
+        return false;
+      },
     };
   },
 });
@@ -1095,6 +1114,17 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
     case "setAppearance":
       applyAppearance(args);
       requestAnimationFrame(reportContentHeight);
+      return true;
+    case "registerIconAsset":
+      {
+        const icon = normalizedIconName(args.icon);
+        const src = typeof args.src === "string" ? args.src.trim() : "";
+        if (src) {
+          vellixIconAssets.set(icon, src);
+          traceDiag("icon-asset-registered", { icon, bytes: src.length });
+          renderCalloutIcons();
+        }
+      }
       return true;
     case "insertDivider":
       insertNode({ type: "divider", attrs: { id: id() } });
