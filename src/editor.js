@@ -14,21 +14,22 @@ const DEFAULT_CALLOUT_ICON = "sparkle";
 const DEFAULT_CALLOUT_COLOR = "#ffffff";
 const vellixIconAssets = new Map();
 const SLASH_ITEMS = [
-  { key: "heading1", title: "H1", detail: "Large heading" },
-  { key: "heading2", title: "H2", detail: "Section heading" },
-  { key: "heading3", title: "H3", detail: "Subheading" },
-  { key: "heading4", title: "H4", detail: "Small heading" },
-  { key: "heading5", title: "H5", detail: "Tiny heading" },
-  { key: "paragraph", title: "Paragraph", detail: "Plain text" },
-  { key: "toggleListItem", title: "Toggle", detail: "Collapsible block" },
-  { key: "callout", title: "Callout", detail: "Highlighted note" },
-  { key: "quote", title: "Blockquote", detail: "Quoted text" },
-  { key: "checkListItem", title: "Checklist", detail: "Hollow circle tasks" },
-  { key: "bulletListItem", title: "Bullet List", detail: "Bulleted items" },
-  { key: "numberedListItem", title: "Numbered List", detail: "Ordered items" },
-  { key: "codeBlock", title: "Code Block", detail: "Monospace code" },
-  { key: "divider", title: "Divider", detail: "Section line" },
-  { key: "pageBreak", title: "Page Break", detail: "Page boundary" },
+  { key: "heading1", title: "H1", detail: "Large heading", icon: "1wavy" },
+  { key: "heading2", title: "H2", detail: "Section heading", icon: "2wavy" },
+  { key: "heading3", title: "H3", detail: "Subheading", icon: "3wavy" },
+  { key: "heading4", title: "H4", detail: "Small heading", icon: "4wavy" },
+  { key: "heading5", title: "H5", detail: "Tiny heading", icon: "5wavy" },
+  { key: "paragraph", title: "Paragraph", detail: "Plain text", icon: "linedpages" },
+  { key: "toggleListItem", title: "Toggle", detail: "Collapsible block", icon: "chevright" },
+  { key: "callout", title: "Callout", detail: "Highlighted note", icon: "sparkle" },
+  { key: "quote", title: "Blockquote", detail: "Quoted text", icon: "quote" },
+  { key: "checkListItem", title: "Checklist", detail: "Hollow circle tasks", icon: "checkwavy" },
+  { key: "bulletListItem", title: "Bullet List", detail: "Bulleted items", icon: "listcircle" },
+  { key: "numberedListItem", title: "Numbered List", detail: "Ordered items", icon: "numcal" },
+  { key: "underline", title: "Underline", detail: "Underlined text", icon: "linesbmark" },
+  { key: "inlineCode", title: "Inline Code", detail: "Inline code text", icon: "codewindow" },
+  { key: "divider", title: "Divider", detail: "Section line", icon: "minuswavy" },
+  { key: "pageBreak", title: "Page Break", detail: "Page boundary", icon: "pagefold" },
 ];
 
 function postToSwift(kind, payload = {}) {
@@ -72,6 +73,11 @@ function iconSource(icon, tint = DEFAULT_CALLOUT_COLOR, size = 22) {
     size: String(size),
   });
   return `vellix-icon://asset/${encodeURIComponent(cleanIcon)}?${params.toString()}`;
+}
+
+function setRegisteredIconCSSVariable(icon, src) {
+  const variableName = `--vellix-asset-${normalizedIconName(icon)}`;
+  document.documentElement.style.setProperty(variableName, cssBackgroundImageSource(src));
 }
 
 function cssBackgroundImageSource(src) {
@@ -471,6 +477,10 @@ function documentBlocks(source) {
   return flattened;
 }
 
+function topLevelDocumentBlocks(source) {
+  return normalizeTipTapDocument(source).content.filter((node) => node.type !== "text");
+}
+
 function statistics(document) {
   const compact = plainText(document)
     .split(/\s+/)
@@ -728,18 +738,106 @@ const ToggleItem = Node.create({
     };
   },
   parseHTML() {
-    return [{ tag: "details[data-vellix-toggle]" }];
-  },
-  renderHTML({ HTMLAttributes }) {
     return [
-      "details",
+      {
+        tag: "div[data-vellix-toggle]",
+        getAttrs: (element) => ({ open: element.getAttribute("data-open") !== "false" }),
+      },
+      {
+        tag: "details[data-vellix-toggle]",
+        getAttrs: (element) => ({ open: element.hasAttribute("open") }),
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes, node }) {
+    const isOpen = node.attrs.open !== false;
+    return [
+      "div",
       mergeAttributes(HTMLAttributes, {
         "data-vellix-toggle": "true",
-        open: HTMLAttributes.open === false ? null : "open",
+        "data-open": isOpen ? "true" : "false",
       }),
-      ["summary", { contenteditable: "false" }, ""],
-      ["div", { class: "vellix-toggle-content" }, 0],
+      [
+        "button",
+        {
+          type: "button",
+          class: "vellix-toggle-button",
+          contenteditable: "false",
+          "data-vellix-toggle-button": "true",
+          "aria-label": isOpen ? "Collapse toggle" : "Expand toggle",
+        },
+        "",
+      ],
+      ["div", { class: "vellix-toggle-content", "data-vellix-toggle-content": "true" }, 0],
     ];
+  },
+  addNodeView() {
+    return ({ editor: nodeEditor, node, getPos }) => {
+      let currentNode = node;
+      const dom = document.createElement("div");
+      const button = document.createElement("button");
+      const contentDOM = document.createElement("div");
+
+      dom.dataset.vellixToggle = "true";
+      dom.className = "vellix-toggle";
+
+      button.type = "button";
+      button.className = "vellix-toggle-button";
+      button.contentEditable = "false";
+      button.dataset.vellixToggleButton = "true";
+
+      contentDOM.className = "vellix-toggle-content";
+      contentDOM.dataset.vellixToggleContent = "true";
+
+      dom.append(button, contentDOM);
+
+      const render = () => {
+        const isOpen = currentNode.attrs.open !== false;
+        const blockId = nodeId(currentNode);
+        dom.dataset.open = isOpen ? "true" : "false";
+        dom.dataset.vellixBlockId = blockId;
+        button.setAttribute("aria-label", isOpen ? "Collapse toggle" : "Expand toggle");
+        button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      };
+
+      const toggleOpen = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const position = typeof getPos === "function" ? getPos() : null;
+        if (position == null || Number.isNaN(position)) return;
+        nodeEditor.view.dispatch(
+          nodeEditor.state.tr.setNodeMarkup(position, undefined, {
+            ...currentNode.attrs,
+            open: currentNode.attrs.open === false,
+          }),
+        );
+        requestAnimationFrame(reportContentHeight);
+      };
+
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", toggleOpen);
+      render();
+
+      return {
+        dom,
+        contentDOM,
+        update(updatedNode) {
+          if (updatedNode.type.name !== "toggleItem") return false;
+          currentNode = updatedNode;
+          render();
+          return true;
+        },
+        stopEvent(event) {
+          return event.target === button || button.contains(event.target);
+        },
+        ignoreMutation(mutation) {
+          return mutation.target === button || button.contains(mutation.target);
+        },
+        destroy() {
+          button.removeEventListener("click", toggleOpen);
+        },
+      };
+    };
   },
 });
 
@@ -887,7 +985,7 @@ function scheduleUpdate() {
 }
 
 function blockOuters() {
-  const ids = new Set(documentBlocks(editor.getJSON()).map(nodeId));
+  const ids = new Set(topLevelDocumentBlocks(editor.getJSON()).map(nodeId));
   return Array.from(
     document.querySelectorAll(".tiptap-editor [data-vellix-block-id]"),
   ).filter((outer) => ids.has(outer.dataset.vellixBlockId || ""));
@@ -901,9 +999,15 @@ function setSelectionClasses() {
   if (document.body) document.body.dataset.vellixSelectionMode = selectionMode;
   editor.setEditable(!inSelectionMode, false);
 
+  document.querySelectorAll(".tiptap-editor [data-vellix-block-id]").forEach((outer) => {
+    outer.classList.remove("vellix-selectable-block", "vellix-selected-block");
+    outer.removeAttribute("data-vellix-selected");
+  });
+
   blockOuters().forEach((outer) => {
     const blockId = outer.dataset.vellixBlockId;
     const selected = blockId ? selection.has(blockId) : false;
+    outer.classList.add("vellix-selectable-block");
     outer.classList.toggle("vellix-selected-block", selected);
     outer.setAttribute("data-vellix-selected", selected ? "true" : "false");
   });
@@ -957,7 +1061,7 @@ function reportContentHeight() {
 }
 
 function selectedBlocks() {
-  const blocks = documentBlocks(editor.getJSON()).filter((block) => selection.has(nodeId(block)));
+  const blocks = topLevelDocumentBlocks(editor.getJSON()).filter((block) => selection.has(nodeId(block)));
   if (!blocks.length) {
     postToSwift("error", { message: "Select at least one block first." });
     return null;
@@ -1100,6 +1204,13 @@ function formatSelectedBlocks(action, value = null) {
     if (!selection.has(nodeId(node))) return node;
 
     switch (action) {
+      case "codeUnderline": {
+        const texts = textNodesIn(node);
+        const shouldEnable = texts.length
+          ? !texts.every((textNode) => textHasMark(textNode, "code") && textHasMark(textNode, "underline"))
+          : true;
+        return setMarkOnNode(setMarkOnNode(node, "code", shouldEnable), "underline", shouldEnable);
+      }
       case "bold":
       case "italic":
       case "underline":
@@ -1288,9 +1399,10 @@ function renderSlashMenu() {
       button.dataset.active = index === slashState.index ? "true" : "false";
       button.dataset.key = item.key;
       button.setAttribute("role", "option");
+      const iconStyle = cssBackgroundImageSource(iconSource(item.icon, "#ffffff", 24));
       button.innerHTML = `
-        <span class="vellix-slash-icon">${item.title.replace(/^Heading /, "H")}</span>
-        <span>
+        <span class="vellix-slash-icon" style="--vellix-slash-icon: ${iconStyle};"></span>
+        <span class="vellix-slash-copy">
           <span class="vellix-slash-title">${item.title}</span>
           <span class="vellix-slash-detail">${item.detail}</span>
         </span>
@@ -1347,6 +1459,12 @@ function chooseSlashItem(key) {
   if (!slashState) return false;
   const range = slashState.range;
   hideSlashMenu();
+  if (key === "inlineCode") {
+    return editor.chain().focus().deleteRange(range).toggleMark("code").toggleMark("underline").run();
+  }
+  if (key === "underline") {
+    return editor.chain().focus().deleteRange(range).toggleMark("underline").run();
+  }
   return insertBlockByKey(key, range);
 }
 
@@ -1453,8 +1571,10 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
         const src = typeof args.src === "string" ? args.src.trim() : "";
         if (src) {
           vellixIconAssets.set(icon, src);
+          setRegisteredIconCSSVariable(icon, src);
           traceDiag("icon-asset-registered", { icon, bytes: src.length });
           renderCalloutIcons();
+          if (slashState && !slashMenu.hidden) renderSlashMenu();
         }
       }
       return true;
@@ -1483,6 +1603,11 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 	    case "formatSelectedBlocks":
 	      formatSelectedBlocks(args.action, args.value);
 	      return true;
+      case "toggleTextMark":
+        if (args.mark === "codeUnderline") {
+          return editor.chain().focus().toggleMark("code").toggleMark("underline").run();
+        }
+        return editor.chain().focus().toggleMark(args.mark || "code").run();
 	    case "updateCalloutIcon":
 	      updateCalloutIcon(args.blockId, args.icon);
 	      return true;
@@ -1493,7 +1618,7 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 	    case "selectAllBlocks":
 	      selectionMode = "multi";
 	      selection.clear();
-	      documentBlocks(editor.getJSON()).forEach((block) => selection.add(nodeId(block)));
+	      topLevelDocumentBlocks(editor.getJSON()).forEach((block) => selection.add(nodeId(block)));
 	      setSelectionClasses();
 	      return true;
 	    case "setSelectionMode":
