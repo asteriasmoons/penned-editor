@@ -737,6 +737,65 @@ const ToggleItem = Node.create({
       open: { default: true },
     };
   },
+  addKeyboardShortcuts() {
+    return {
+      // Enter at the end of the toggle's summary line drops the cursor into a
+      // NEW paragraph INSIDE the toggle body (Notion behavior). Also force-
+      // opens the toggle if it was collapsed so the new line is visible.
+      // Enter inside the body works normally (this returns false so TipTap's
+      // default splitBlock runs).
+      Enter: ({ editor }) => {
+        const { $from, empty } = editor.state.selection;
+        if (!empty) return false;
+        for (let depth = $from.depth; depth > 0; depth -= 1) {
+          if ($from.node(depth).type.name !== "toggleItem") continue;
+          const childDepth = depth + 1;
+          if ($from.depth < childDepth) return false;
+          const isFirstChild = $from.index(depth) === 0;
+          const isAtEnd = $from.parentOffset === $from.parent.content.size;
+          if (!isFirstChild || !isAtEnd) return false;
+
+          const toggleNode = $from.node(depth);
+          const togglePos = $from.before(depth);
+          const insertAt = $from.after($from.depth); // right after the summary paragraph
+          const chain = editor.chain().focus();
+          if (toggleNode.attrs.open === false) {
+            chain.command(({ tr }) => {
+              tr.setNodeMarkup(togglePos, undefined, { ...toggleNode.attrs, open: true });
+              return true;
+            });
+          }
+          return chain
+            .insertContentAt(insertAt, { type: "paragraph" }, { updateSelection: false })
+            .setTextSelection(insertAt + 1)
+            .run();
+        }
+        return false;
+      },
+      // Backspace at the start of an EMPTY toggle unwraps it back to a plain
+      // paragraph. If the toggle has any content, do nothing so users don't
+      // lose text unexpectedly.
+      Backspace: ({ editor }) => {
+        const { $from, empty } = editor.state.selection;
+        if (!empty || $from.parentOffset !== 0) return false;
+        for (let depth = $from.depth; depth > 0; depth -= 1) {
+          if ($from.node(depth).type.name !== "toggleItem") continue;
+          const toggleNode = $from.node(depth);
+          if (toggleNode.childCount !== 1) return false;
+          const only = toggleNode.firstChild;
+          if (!only || only.textContent.length > 0 || only.childCount > 0) return false;
+          const from = $from.before(depth);
+          const to = $from.after(depth);
+          return editor
+            .chain()
+            .focus()
+            .insertContentAt({ from, to }, { type: "paragraph" }, { updateSelection: true })
+            .run();
+        }
+        return false;
+      },
+    };
+  },
   parseHTML() {
     return [
       {
@@ -1576,6 +1635,23 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
           renderCalloutIcons();
           if (slashState && !slashMenu.hidden) renderSlashMenu();
         }
+      }
+      return true;
+    case "registerIconAssets":
+      {
+        const assets = args.assets && typeof args.assets === "object" ? args.assets : {};
+        let registered = 0;
+        for (const [rawIcon, rawSrc] of Object.entries(assets)) {
+          const icon = normalizedIconName(rawIcon);
+          const src = typeof rawSrc === "string" ? rawSrc.trim() : "";
+          if (!src) continue;
+          vellixIconAssets.set(icon, src);
+          setRegisteredIconCSSVariable(icon, src);
+          registered += 1;
+        }
+        traceDiag("icon-assets-registered-bulk", { count: registered });
+        renderCalloutIcons();
+        if (slashState && !slashMenu.hidden) renderSlashMenu();
       }
       return true;
     case "insertDivider":
