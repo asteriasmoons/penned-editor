@@ -5,6 +5,8 @@
 //   JS -> Swift   webkit.messageHandlers.tiptap.postMessage({ kind, payload })
 
 import { Editor, Extension, Node, mergeAttributes } from "@tiptap/core";
+import { AllSelection, NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskItem from "@tiptap/extension-task-item";
@@ -12,13 +14,37 @@ import TaskList from "@tiptap/extension-task-list";
 
 const DEFAULT_CALLOUT_ICON = "sparkle";
 const DEFAULT_CALLOUT_COLOR = "#ffffff";
+const DEFAULT_DIVIDER_STYLE = "thinLine";
+const DIVIDER_STYLES = {
+  dottedCircles: {
+    title: "Dotted Circles",
+    detail: "Circle dot divider",
+    icon: "listcircle",
+  },
+  thickLine: {
+    title: "Thick Line",
+    detail: "Bold rounded divider",
+    icon: "minuswavy",
+  },
+  thinLine: {
+    title: "Thin Line",
+    detail: "Minimal divider",
+    icon: "minuswavy",
+  },
+  fourCircles: {
+    title: "Four Circles",
+    detail: "Centered circle divider",
+    icon: "listcircle",
+  },
+};
 const vellixIconAssets = new Map();
+const selectionHighlightPluginKey = new PluginKey("vellixTextSelectionHighlight");
 const SLASH_ITEMS = [
-  { key: "heading1", title: "H1", detail: "Large heading", icon: "1wavy" },
-  { key: "heading2", title: "H2", detail: "Section heading", icon: "2wavy" },
-  { key: "heading3", title: "H3", detail: "Subheading", icon: "3wavy" },
-  { key: "heading4", title: "H4", detail: "Small heading", icon: "4wavy" },
-  { key: "heading5", title: "H5", detail: "Tiny heading", icon: "5wavy" },
+  { key: "heading1", title: "H1", detail: "Large heading", icon: "h1" },
+  { key: "heading2", title: "H2", detail: "Section heading", icon: "h2" },
+  { key: "heading3", title: "H3", detail: "Subheading", icon: "h3" },
+  { key: "heading4", title: "H4", detail: "Small heading", icon: "h4" },
+  { key: "heading5", title: "H5", detail: "Tiny heading", icon: "h5" },
   { key: "paragraph", title: "Paragraph", detail: "Plain text", icon: "linedpages" },
   { key: "toggleListItem", title: "Toggle", detail: "Collapsible block", icon: "chevright" },
   { key: "callout", title: "Callout", detail: "Highlighted note", icon: "sparkle" },
@@ -28,8 +54,13 @@ const SLASH_ITEMS = [
   { key: "numberedListItem", title: "Numbered List", detail: "Ordered items", icon: "numcal" },
   { key: "underline", title: "Underline", detail: "Underlined text", icon: "linesbmark" },
   { key: "inlineCode", title: "Inline Code", detail: "Inline code text", icon: "codewindow" },
-  { key: "divider", title: "Divider", detail: "Section line", icon: "minuswavy" },
   { key: "pageBreak", title: "Page Break", detail: "Page boundary", icon: "pagefold" },
+  ...Object.entries(DIVIDER_STYLES).map(([style, item]) => ({
+    key: `divider:${style}`,
+    title: item.title,
+    detail: item.detail,
+    icon: item.icon,
+  })),
 ];
 
 function postToSwift(kind, payload = {}) {
@@ -61,6 +92,24 @@ function nodeId(node) {
 
 function normalizedIconName(icon) {
   return String(icon || DEFAULT_CALLOUT_ICON).trim() || DEFAULT_CALLOUT_ICON;
+}
+
+function normalizedDividerStyle(style) {
+  const cleanStyle = String(style || "").trim();
+  switch (cleanStyle) {
+    case "dottedCircles":
+    case "tinyDots":
+      return "dottedCircles";
+    case "fourCircles":
+    case "fourDots":
+      return "fourCircles";
+    case "thickLine":
+      return "thickLine";
+    case "thinLine":
+      return "thinLine";
+    default:
+      return DEFAULT_DIVIDER_STYLE;
+  }
 }
 
 function iconSource(icon, tint = DEFAULT_CALLOUT_COLOR, size = 22) {
@@ -421,7 +470,10 @@ function importLegacyBlock(value) {
         content: [paragraph(content)],
       };
     case "divider":
-      return { type: "divider", attrs: { id: blockID } };
+      return {
+        type: "divider",
+        attrs: { id: blockID, style: normalizedDividerStyle(props.style) },
+      };
     case "pageBreak":
       return { type: "pageBreak", attrs: { id: blockID } };
     case "toggleListItem":
@@ -481,6 +533,17 @@ function topLevelDocumentBlocks(source) {
   return normalizeTipTapDocument(source).content.filter((node) => node.type !== "text");
 }
 
+function topLevelSelectableBlocks(source) {
+  const blocks = topLevelDocumentBlocks(source);
+  const isEmptyParagraph = (node) =>
+    node?.type === "paragraph" && !plainText(node).trim();
+  return (
+    blocks.length && isEmptyParagraph(blocks[blocks.length - 1])
+      ? blocks.slice(0, -1)
+      : blocks
+  );
+}
+
 function statistics(document) {
   const compact = plainText(document)
     .split(/\s+/)
@@ -490,6 +553,16 @@ function statistics(document) {
     wordCount: compact ? compact.split(/\s+/).length : 0,
     characterCount: compact.length,
   };
+}
+
+function renderIconElement(iconElement, icon, color = DEFAULT_CALLOUT_COLOR, size = 22) {
+  const normalizedIcon = normalizedIconName(icon);
+  const src = iconSource(normalizedIcon, color, size);
+  iconElement.setAttribute("role", "img");
+  iconElement.setAttribute("aria-label", normalizedIcon);
+  iconElement.style.backgroundImage = cssBackgroundImageSource(src);
+  iconElement.hidden = false;
+  return { icon: normalizedIcon, src };
 }
 
 function renderCalloutIcons(root = document) {
@@ -503,10 +576,7 @@ function renderCalloutIcons(root = document) {
       nextSrc: src,
       previousSrc: iconElement.getAttribute("src") || iconElement.style.backgroundImage || null,
     });
-    iconElement.setAttribute("role", "img");
-    iconElement.setAttribute("aria-label", icon);
-    iconElement.style.backgroundImage = cssBackgroundImageSource(src);
-    iconElement.hidden = false;
+    renderIconElement(iconElement, icon, color, 22);
     traceDiag("callout-dom-icon-mounted", {
       id: callout.dataset.vellixBlockId || null,
       icon,
@@ -555,6 +625,7 @@ const BlockID = Extension.create({
         attributes: {
           id: {
             default: null,
+            keepOnSplit: false,
             parseHTML: (element) => element.getAttribute("data-vellix-block-id"),
             renderHTML: (attrs) =>
               typeof attrs.id === "string" && attrs.id.trim()
@@ -584,6 +655,101 @@ const BlockID = Extension.create({
     ];
   },
 });
+
+const VellixTaskItem = TaskItem.extend({
+  addNodeView() {
+    return ({ editor: nodeEditor, node, getPos, HTMLAttributes }) => {
+      let currentNode = node;
+      const listItem = document.createElement("li");
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      const visual = document.createElement("span");
+      const contentDOM = document.createElement("div");
+
+      label.contentEditable = "false";
+      checkbox.type = "checkbox";
+      checkbox.tabIndex = -1;
+      visual.setAttribute("aria-hidden", "true");
+
+      listItem.dataset.type = "taskItem";
+      contentDOM.dataset.vellixTaskContent = "true";
+      label.append(checkbox, visual);
+      listItem.append(label, contentDOM);
+
+      const applyAttributes = () => {
+        for (const [key, value] of Object.entries(HTMLAttributes || {})) {
+          if (value == null) continue;
+          if (key === "class") {
+            listItem.className = value;
+          } else {
+            listItem.setAttribute(key, value);
+          }
+        }
+      };
+
+      const render = () => {
+        const checked = currentNode.attrs.checked === true;
+        applyAttributes();
+        listItem.dataset.type = "taskItem";
+        listItem.dataset.checked = checked ? "true" : "false";
+        listItem.dataset.vellixBlockId = nodeId(currentNode);
+        checkbox.checked = checked;
+        checkbox.setAttribute("aria-checked", checked ? "true" : "false");
+      };
+
+      const setChecked = (checked) => {
+        const position = typeof getPos === "function" ? getPos() : null;
+        if (position == null || Number.isNaN(position)) return false;
+        nodeEditor.view.dispatch(
+          nodeEditor.state.tr.setNodeMarkup(position, undefined, {
+            ...currentNode.attrs,
+            checked,
+          }),
+        );
+        requestAnimationFrame(reportContentHeight);
+        return true;
+      };
+
+      const toggleChecked = (event) => {
+        if (selectionMode !== "off") {
+          event.preventDefault();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (!nodeEditor.isEditable) return;
+        setChecked(currentNode.attrs.checked !== true);
+      };
+
+      label.addEventListener("mousedown", (event) => {
+        if (selectionMode === "off") event.preventDefault();
+      });
+      label.addEventListener("click", toggleChecked);
+      render();
+
+      return {
+        dom: listItem,
+        contentDOM,
+        update(updatedNode) {
+          if (updatedNode.type.name !== "taskItem") return false;
+          currentNode = updatedNode;
+          render();
+          return true;
+        },
+        stopEvent(event) {
+          if (selectionMode !== "off") return false;
+          return event.target === label || label.contains(event.target);
+        },
+        ignoreMutation(mutation) {
+          return mutation.target === label || label.contains(mutation.target);
+        },
+        destroy() {
+          label.removeEventListener("click", toggleChecked);
+        },
+      };
+    };
+  },
+}).configure({ nested: true });
 
 const Callout = Node.create({
   name: "callout",
@@ -701,13 +867,49 @@ const Divider = Node.create({
   group: "block",
   atom: true,
   addAttributes() {
-    return { id: { default: null } };
+    return {
+      id: { default: null },
+      style: {
+        default: DEFAULT_DIVIDER_STYLE,
+        parseHTML: (element) =>
+          normalizedDividerStyle(
+            element.getAttribute("data-divider-style") ||
+              element.getAttribute("data-vellix-divider-style")
+          ),
+        renderHTML: (attributes) => ({
+          "data-divider-style": normalizedDividerStyle(attributes.style),
+        }),
+      },
+    };
   },
   parseHTML() {
-    return [{ tag: "hr[data-vellix-divider]" }];
+    return [{ tag: "div[data-vellix-divider]" }, { tag: "hr[data-vellix-divider]" }];
   },
-  renderHTML({ HTMLAttributes }) {
-    return ["hr", mergeAttributes(HTMLAttributes, { "data-vellix-divider": "true" })];
+  renderHTML({ node, HTMLAttributes }) {
+    const style = normalizedDividerStyle(node?.attrs?.style);
+    const content =
+      style === "dottedCircles"
+        ? [
+            "span",
+            { class: "vellix-divider-dots", "aria-hidden": "true" },
+            ...Array.from({ length: 24 }, () => ["span", { class: "vellix-divider-dot" }]),
+          ]
+        : style === "fourCircles"
+          ? [
+              "span",
+              { class: "vellix-divider-four-circles", "aria-hidden": "true" },
+              ...Array.from({ length: 4 }, () => ["span", { class: "vellix-divider-circle" }]),
+            ]
+          : ["span", { class: "vellix-divider-line", "aria-hidden": "true" }];
+
+    return [
+      "div",
+      mergeAttributes(HTMLAttributes, {
+        "data-vellix-divider": "true",
+        "data-divider-style": style,
+      }),
+      content,
+    ];
   },
 });
 
@@ -715,14 +917,25 @@ const PageBreak = Node.create({
   name: "pageBreak",
   group: "block",
   atom: true,
+  selectable: true,
   addAttributes() {
     return { id: { default: null } };
   },
   parseHTML() {
-    return [{ tag: "div[data-vellix-page-break]" }];
+    return [
+      { tag: "div[data-vellix-page-break]" },
+      { tag: "div[data-type='pageBreak']" },
+      { tag: "div[data-page-break]" },
+    ];
   },
   renderHTML({ HTMLAttributes }) {
-    return ["div", mergeAttributes(HTMLAttributes, { "data-vellix-page-break": "true" })];
+    return [
+      "div",
+      mergeAttributes(HTMLAttributes, {
+        "data-vellix-page-break": "true",
+        "aria-hidden": "true",
+      }),
+    ];
   },
 });
 
@@ -860,6 +1073,10 @@ const ToggleItem = Node.create({
       };
 
       const toggleOpen = (event) => {
+        if (selectionMode !== "off") {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         const position = typeof getPos === "function" ? getPos() : null;
@@ -873,7 +1090,9 @@ const ToggleItem = Node.create({
         requestAnimationFrame(reportContentHeight);
       };
 
-      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("mousedown", (event) => {
+        if (selectionMode === "off") event.preventDefault();
+      });
       button.addEventListener("click", toggleOpen);
       render();
 
@@ -887,6 +1106,7 @@ const ToggleItem = Node.create({
           return true;
         },
         stopEvent(event) {
+          if (selectionMode !== "off") return false;
           return event.target === button || button.contains(event.target);
         },
         ignoreMutation(mutation) {
@@ -900,10 +1120,38 @@ const ToggleItem = Node.create({
   },
 });
 
+const SelectionTextHighlight = Extension.create({
+  name: "vellixTextSelectionHighlight",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: selectionHighlightPluginKey,
+        state: {
+          init: () => 0,
+          apply: (transaction, value) =>
+            transaction.getMeta(selectionHighlightPluginKey) || transaction.docChanged
+              ? value + 1
+              : value,
+        },
+        props: {
+          decorations(state) {
+            selectionHighlightPluginKey.getState(state);
+            if (selectionMode === "off" || !selection.size) return DecorationSet.empty;
+            return selectedTextDecorationSet(state.doc);
+          },
+        },
+      }),
+    ];
+  },
+});
+
 const selection = new Set();
 let selectionMode = "off";
+let selectionDecorationRefreshQueued = false;
+let lastSelectionHandleEvent = { key: "", time: 0 };
 let lastHeight = -1;
 let lastSelectionCount = -1;
+let lastPageBreakSignature = "";
 let saveTimer;
 
 const editor = new Editor({
@@ -911,9 +1159,10 @@ const editor = new Editor({
   extensions: [
     StarterKit.configure({ horizontalRule: false }),
     TaskList,
-    TaskItem.configure({ nested: true }),
+    VellixTaskItem,
     Placeholder.configure({ placeholder: "" }),
     BlockID,
+    SelectionTextHighlight,
     Callout,
     Divider,
     PageBreak,
@@ -1043,11 +1292,537 @@ function scheduleUpdate() {
   }, 500);
 }
 
+function roundedRectNumber(value) {
+  return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
+}
+
+function shortText(value, limit = 120) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+
+function domElementTrace(element) {
+  if (!element) return null;
+  const rect = element.getBoundingClientRect?.();
+  return {
+    tag: element.tagName?.toLowerCase?.() || null,
+    dataType: element.getAttribute?.("data-type") || null,
+    blockId: element.dataset?.vellixBlockId || null,
+    className:
+      typeof element.className === "string"
+        ? shortText(element.className, 90)
+        : shortText(element.getAttribute?.("class"), 90),
+    top: rect ? roundedRectNumber(rect.top) : null,
+    left: rect ? roundedRectNumber(rect.left) : null,
+    width: rect ? roundedRectNumber(rect.width) : null,
+    height: rect ? roundedRectNumber(rect.height) : null,
+  };
+}
+
+function domParentTrace(element) {
+  const parent = element?.parentElement;
+  return parent ? domElementTrace(parent) : null;
+}
+
+function domPathTrace(element) {
+  const parts = [];
+  let current = element;
+  while (current && current.nodeType === globalThis.Node.ELEMENT_NODE && parts.length < 6) {
+    const tag = current.tagName?.toLowerCase?.() || "element";
+    const dataType = current.getAttribute?.("data-type");
+    const blockId = current.dataset?.vellixBlockId;
+    const classes = typeof current.className === "string"
+      ? current.className.split(/\s+/).filter(Boolean).slice(0, 2)
+      : [];
+    parts.push(
+      `${tag}${dataType ? `[data-type=${dataType}]` : ""}${blockId ? `[block=${blockId}]` : ""}${classes.length ? `.${classes.join(".")}` : ""}`,
+    );
+    if (current.classList?.contains("tiptap-editor")) break;
+    current = current.parentElement;
+  }
+  return parts.join(" <- ");
+}
+
+function topLevelBlockTraceRecords(source) {
+  return topLevelDocumentBlocks(source).map((node, index) => ({
+    index,
+    id: nodeId(node),
+    type: node.type,
+    text: shortText(plainText(node)),
+    childBlockIds: Array.isArray(node.content)
+      ? node.content
+          .filter((child) => child?.type && child.type !== "text")
+          .map((child) => ({ type: child.type, id: nodeId(child), text: shortText(plainText(child), 60) }))
+      : [],
+  }));
+}
+
+function duplicateValues(values) {
+  const counts = new Map();
+  values.forEach((value) => {
+    if (!value) return;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([value, count]) => ({ value, count }));
+}
+
+function isVisibleElement(element) {
+  if (!element) return false;
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+}
+
+function pathKey(path) {
+  return Array.isArray(path) ? path.join(".") : "";
+}
+
+function selectionKeyForModelPath(path, pos) {
+  const pathValue = pathKey(path);
+  return pathValue ? `path:${pathValue}` : `pos:${pos}`;
+}
+
+function listContainerType(type) {
+  return type === "bulletList" || type === "orderedList" || type === "taskList";
+}
+
+function listRowType(type) {
+  return type === "listItem" || type === "taskItem";
+}
+
+function shouldSelectModelNode(type, parentType) {
+  if (listRowType(type) && listContainerType(parentType)) return true;
+  if (parentType === "doc" && !listContainerType(type)) return true;
+  return false;
+}
+
+function cssIdentifier(value) {
+  const raw = String(value || "");
+  return globalThis.CSS?.escape ? globalThis.CSS.escape(raw) : raw.replace(/["\\]/g, "\\$&");
+}
+
+function elementForModelBlock(block) {
+  const nodeDOM = editor.view.nodeDOM(block.pos);
+  if (nodeDOM instanceof HTMLElement) return nodeDOM;
+
+  const attrID = block.node?.attrs?.id;
+  if (typeof attrID === "string" && attrID.trim()) {
+    const escapedID = cssIdentifier(attrID.trim());
+    const byID = editor.view.dom.querySelector(`[data-vellix-block-id="${escapedID}"]`);
+    if (byID instanceof HTMLElement) return byID;
+  }
+
+  try {
+    const domAtPos = editor.view.domAtPos(block.pos, 1);
+    const element = domAtPos.node instanceof HTMLElement ? domAtPos.node : domAtPos.node?.parentElement;
+    return element?.closest?.(
+      [
+        "[data-vellix-block-id]",
+        "[data-type='taskItem']",
+        "[data-vellix-toggle]",
+        ".vellix-callout",
+        "[data-vellix-divider]",
+        "[data-vellix-page-break]",
+        "li",
+        "p",
+        "blockquote",
+      ].join(", "),
+    ) || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function topLevelModelBlocks(rootDoc = editor.state.doc) {
+  const blocks = [];
+
+  const visitChildren = (parentNode, parentPos, parentPath) => {
+    const parentType = parentNode.type.name;
+    parentNode.forEach((node, offset, index) => {
+      const type = node.type.name;
+      const pos = parentType === "doc" ? offset : parentPos + 1 + offset;
+      const path = [...parentPath, index];
+      const json = normalizeTipTapNode(node.toJSON());
+      const selectable = shouldSelectModelNode(type, parentType);
+
+      if (selectable) {
+        blocks.push({
+          index: blocks.length,
+          node,
+          pos,
+          key: selectionKeyForModelPath(path, pos),
+          json,
+          path,
+          parentType,
+          type,
+        });
+      }
+
+      if (listContainerType(type)) {
+        visitChildren(node, pos, path);
+      }
+    });
+  };
+
+  visitChildren(rootDoc, 0, []);
+
+  const last = blocks[blocks.length - 1];
+  if (last?.parentType === "doc" && last?.type === "paragraph" && !plainText(last.json).trim()) {
+    blocks.pop();
+  }
+
+  return blocks;
+}
+
+function addTextDecorationsForNode(node, nodePos, decorations) {
+  node.descendants((child, childPos) => {
+    if (!child.isText || !String(child.text || "").trim()) return true;
+    const from = nodePos + 1 + childPos;
+    const to = from + child.nodeSize;
+    if (to > from) {
+      decorations.push(
+        Decoration.inline(from, to, {
+          class: "vellix-selected-text-decoration",
+        }),
+      );
+    }
+    return true;
+  });
+}
+
+function selectedTextDecorationSet(rootDoc) {
+  const decorations = [];
+  topLevelModelBlocks(rootDoc).forEach((block) => {
+    if (!selection.has(block.key)) return;
+    addTextDecorationsForNode(block.node, block.pos, decorations);
+  });
+  return decorations.length ? DecorationSet.create(rootDoc, decorations) : DecorationSet.empty;
+}
+
+function scheduleSelectionDecorationRefresh() {
+  if (selectionDecorationRefreshQueued) return;
+  selectionDecorationRefreshQueued = true;
+  queueMicrotask(() => {
+    selectionDecorationRefreshQueued = false;
+    if (!editor?.view) return;
+    editor.view.dispatch(
+      editor.state.tr.setMeta(selectionHighlightPluginKey, { refresh: true }),
+    );
+  });
+}
+
+function selectableBlockRecords() {
+  return topLevelModelBlocks().flatMap((block) => {
+    const element = elementForModelBlock(block);
+    if (!(element instanceof HTMLElement)) return [];
+    if (!editor.view.dom.contains(element) || !isVisibleElement(element)) return [];
+    return [{ ...block, element }];
+  });
+}
+
+function clearSelectionDOMState() {
+  document
+    .querySelectorAll(
+      [
+        ".tiptap-editor .vellix-selectable-block",
+        ".tiptap-editor .vellix-selected-block",
+        ".tiptap-editor [data-vellix-selection-block]",
+        ".tiptap-editor [data-vellix-selected]",
+      ].join(", "),
+    )
+    .forEach((outer) => {
+      outer.classList.remove("vellix-selectable-block", "vellix-selected-block");
+      outer.removeAttribute("data-vellix-selected");
+      outer.removeAttribute("data-vellix-selection-block");
+      outer.removeAttribute("data-vellix-selection-key");
+      outer.removeAttribute("data-vellix-selection-node-type");
+      outer.removeAttribute("data-vellix-selection-index");
+      outer.removeAttribute("data-vellix-selection-path");
+      outer.style.removeProperty("--vellix-selection-y");
+      outer.style.removeProperty("--vellix-selection-highlight-left");
+      outer.style.removeProperty("--vellix-selection-highlight-top");
+      outer.style.removeProperty("--vellix-selection-highlight-width");
+      outer.style.removeProperty("--vellix-selection-highlight-height");
+    });
+}
+
 function blockOuters() {
-  const ids = new Set(topLevelDocumentBlocks(editor.getJSON()).map(nodeId));
-  return Array.from(
-    document.querySelectorAll(".tiptap-editor [data-vellix-block-id]"),
-  ).filter((outer) => ids.has(outer.dataset.vellixBlockId || ""));
+  return selectableBlockRecords().map((record) => record.element);
+}
+
+function selectionIndicatorOffset(outer) {
+  const outerRect = outer.getBoundingClientRect();
+  if (!outerRect.height) return 12;
+  const isTaskItem =
+    outer.matches?.("[data-type='taskItem']") ||
+    (outer.tagName === "LI" && outer.hasAttribute("data-checked"));
+  const markerTarget = isTaskItem
+    ? outer.querySelector(":scope > label")
+    : outer.matches?.("[data-type='taskList']")
+      ? outer.querySelector("[data-type='taskItem'] > label, li[data-checked] > label")
+      : null;
+  const targetRect = markerTarget?.getBoundingClientRect?.();
+  if (targetRect?.height) {
+    return Math.max(12, Math.min(outerRect.height - 12, targetRect.top - outerRect.top + targetRect.height / 2));
+  }
+  return outerRect.height / 2;
+}
+
+function selectionHandleContainsEvent(outer, event) {
+  const rect = outer.getBoundingClientRect();
+  const visibleHandleSize = 18;
+  const visibleHandleRightInset = 8;
+  const centerX = rect.right - visibleHandleRightInset - visibleHandleSize / 2;
+  const centerY = rect.top + selectionIndicatorOffset(outer);
+  const hitRadius = 22;
+  return Math.abs(event.clientX - centerX) <= hitRadius && Math.abs(event.clientY - centerY) <= hitRadius;
+}
+
+function textContentRect(element) {
+  if (!element) return null;
+  const rects = [];
+  const walker = document.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return String(node.nodeValue || "").trim()
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      },
+    },
+  );
+
+  let node = walker.nextNode();
+  while (node) {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    rects.push(...Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0));
+    range.detach?.();
+    node = walker.nextNode();
+  }
+
+  if (!rects.length) return null;
+
+  return rects.reduce(
+    (union, rect) => ({
+      left: Math.min(union.left, rect.left),
+      top: Math.min(union.top, rect.top),
+      right: Math.max(union.right, rect.right),
+      bottom: Math.max(union.bottom, rect.bottom),
+    }),
+    {
+      left: rects[0].left,
+      top: rects[0].top,
+      right: rects[0].right,
+      bottom: rects[0].bottom,
+    },
+  );
+}
+
+function unionRects(rects) {
+  const visibleRects = rects.filter((rect) => rect && rect.width > 0 && rect.height > 0);
+  if (!visibleRects.length) return null;
+  return visibleRects.reduce(
+    (union, rect) => ({
+      left: Math.min(union.left, rect.left),
+      top: Math.min(union.top, rect.top),
+      right: Math.max(union.right, rect.right),
+      bottom: Math.max(union.bottom, rect.bottom),
+    }),
+    {
+      left: visibleRects[0].left,
+      top: visibleRects[0].top,
+      right: visibleRects[0].right,
+      bottom: visibleRects[0].bottom,
+    },
+  );
+}
+
+function selectionHighlightRect(outer) {
+  const outerRect = outer.getBoundingClientRect();
+  const nodeType = outer.dataset?.vellixSelectionNodeType || "";
+  const horizontalPadding = 10;
+  const verticalPadding = 6;
+  const handleGutter = 44;
+  let contentRect = null;
+
+  if (nodeType === "taskItem" || outer.matches?.("[data-type='taskItem']")) {
+    contentRect = unionRects([
+      outer.querySelector(":scope > label")?.getBoundingClientRect?.(),
+      textContentRect(outer.querySelector(":scope > div")),
+    ]);
+  } else if (nodeType === "blockquote" || outer.matches?.("blockquote")) {
+    const textRect = textContentRect(outer);
+    if (textRect) {
+      contentRect = {
+        left: outerRect.left,
+        top: Math.min(outerRect.top, textRect.top),
+        right: textRect.right,
+        bottom: Math.max(outerRect.bottom, textRect.bottom),
+      };
+    }
+  } else if (nodeType === "divider" || outer.matches?.("[data-vellix-divider]")) {
+    contentRect = outerRect;
+  } else if (
+    nodeType === "callout" ||
+    nodeType === "pageBreak" ||
+    nodeType === "toggleItem" ||
+    outer.matches?.(".vellix-callout, [data-vellix-page-break], [data-vellix-toggle], pre")
+  ) {
+    contentRect = outerRect;
+  } else {
+    contentRect = textContentRect(outer) || outerRect;
+  }
+
+  const maxRight = outerRect.right - handleGutter;
+  const left = Math.max(outerRect.left, contentRect.left - horizontalPadding);
+  const top = Math.max(outerRect.top, contentRect.top - verticalPadding);
+  const right = Math.min(maxRight, Math.max(left + 12, contentRect.right + horizontalPadding));
+  const bottom = Math.min(outerRect.bottom + verticalPadding, Math.max(top + 12, contentRect.bottom + verticalPadding));
+
+  return {
+    left: left - outerRect.left,
+    top: top - outerRect.top,
+    width: Math.max(12, right - left),
+    height: Math.max(12, bottom - top),
+  };
+}
+
+function setSelectionHighlightProperties(outer) {
+  const rect = selectionHighlightRect(outer);
+  outer.style.setProperty("--vellix-selection-highlight-left", `${rect.left}px`);
+  outer.style.setProperty("--vellix-selection-highlight-top", `${rect.top}px`);
+  outer.style.setProperty("--vellix-selection-highlight-width", `${rect.width}px`);
+  outer.style.setProperty("--vellix-selection-highlight-height", `${rect.height}px`);
+}
+
+function selectionRecordForEvent(event) {
+  if (selectionMode === "off" || !editor.view.dom.contains(event.target)) return null;
+
+  const records = selectableBlockRecords();
+  const closestBlock = event.target.closest?.("[data-vellix-selection-block='true']");
+  if (
+    closestBlock instanceof HTMLElement &&
+    editor.view.dom.contains(closestBlock) &&
+    selectionHandleContainsEvent(closestBlock, event)
+  ) {
+    const selectionKey = closestBlock.dataset.vellixSelectionKey;
+    return records.find((record) => record.element === closestBlock || record.key === selectionKey) || {
+      element: closestBlock,
+      key: selectionKey,
+    };
+  }
+
+  return records.find((record) => selectionHandleContainsEvent(record.element, event)) || null;
+}
+
+function handleSelectionHandleEvent(event) {
+  const record = selectionRecordForEvent(event);
+  if (!record) return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const selectionKey = record.key || record.element?.dataset?.vellixSelectionKey;
+  const now = performance.now();
+  if (
+    event.type === "click" &&
+    selectionKey &&
+    lastSelectionHandleEvent.key === selectionKey &&
+    now - lastSelectionHandleEvent.time < 500
+  ) {
+    return true;
+  }
+
+  toggleBlockSelection(selectionKey);
+  lastSelectionHandleEvent = { key: selectionKey || "", time: now };
+  return true;
+}
+
+function pruneSelectionToSelectable(records) {
+  const keys = new Set(records.map((record) => record.key));
+  Array.from(selection).forEach((key) => {
+    if (!keys.has(key)) selection.delete(key);
+  });
+}
+
+function traceSelectionRegistry(label, selectableRecords) {
+  const documentJSON = editor.getJSON();
+  const topLevelBlocks = topLevelBlockTraceRecords(documentJSON);
+  const topLevelById = new Map(topLevelBlocks.map((block) => [block.id, block]));
+  const allCandidates = Array.from(document.querySelectorAll(".tiptap-editor [data-vellix-block-id]"));
+  const visibleCandidates = allCandidates.filter(isVisibleElement);
+  const candidateRecords = visibleCandidates.map((element, index) => {
+    const blockId = element.dataset.vellixBlockId || "";
+    const topLevelBlock = topLevelById.get(blockId);
+    const elementTrace = domElementTrace(element);
+    return {
+      index,
+      blockId,
+      nodeType: topLevelBlock?.type || null,
+      isTopLevelDocumentBlock: topLevelById.has(blockId),
+      isDirectEditorChild: element.parentElement === editor.view.dom,
+      domElement: elementTrace,
+      parentNode: domParentTrace(element),
+      path: domPathTrace(element),
+      topPosition: elementTrace?.top ?? null,
+    };
+  });
+  const registryRecords = selectableRecords.map((record) => {
+    const elementTrace = domElementTrace(record.element);
+    return {
+      index: record.index,
+      blockId: record.node.attrs?.id || null,
+      selectionKey: record.key,
+      nodeType: record.node.type.name,
+      parentType: record.parentType,
+      modelPath: record.path,
+      prosemirrorPos: record.pos,
+      domElement: elementTrace,
+      parentNode: domParentTrace(record.element),
+      path: domPathTrace(record.element),
+      topPosition: elementTrace?.top ?? null,
+    };
+  });
+  const candidateCountsByBlockId = Array.from(
+    visibleCandidates.reduce((counts, element) => {
+      const blockId = element.dataset.vellixBlockId || "";
+      if (!blockId) return counts;
+      counts.set(blockId, (counts.get(blockId) || 0) + 1);
+      return counts;
+    }, new Map()),
+    ([blockId, count]) => ({ blockId, count }),
+  );
+  const duplicateTopPositions = duplicateValues(
+    registryRecords.map((record) =>
+      typeof record.topPosition === "number" ? String(Math.round(record.topPosition)) : null,
+    ),
+  );
+
+  traceDiag("selection-registry", {
+    label,
+    mode: selectionMode,
+    topLevelBlocks,
+    duplicateTopLevelIds: duplicateValues(topLevelBlocks.map((block) => block.id)),
+    modelBlocks: topLevelModelBlocks().map((block) => ({
+      index: block.index,
+      blockId: block.node.attrs?.id || null,
+      selectionKey: block.key,
+      nodeType: block.node.type.name,
+      parentType: block.parentType,
+      modelPath: block.path,
+      prosemirrorPos: block.pos,
+      text: shortText(plainText(block.json)),
+    })),
+    domCandidateCount: candidateRecords.length,
+    candidateCountsByBlockId,
+    domCandidates: candidateRecords,
+    selectableCount: registryRecords.length,
+    selectableBlocks: registryRecords,
+    duplicateSelectableIds: duplicateValues(registryRecords.map((block) => block.selectionKey)),
+    duplicateSelectableTopPositions: duplicateTopPositions,
+  });
 }
 
 function setSelectionClasses() {
@@ -1058,45 +1833,85 @@ function setSelectionClasses() {
   if (document.body) document.body.dataset.vellixSelectionMode = selectionMode;
   editor.setEditable(!inSelectionMode, false);
 
-  document.querySelectorAll(".tiptap-editor [data-vellix-block-id]").forEach((outer) => {
-    outer.classList.remove("vellix-selectable-block", "vellix-selected-block");
-    outer.removeAttribute("data-vellix-selected");
-  });
+  clearSelectionDOMState();
 
-  blockOuters().forEach((outer) => {
-    const blockId = outer.dataset.vellixBlockId;
-    const selected = blockId ? selection.has(blockId) : false;
+  const selectableBlocks = selectableBlockRecords();
+  pruneSelectionToSelectable(selectableBlocks);
+  if (inSelectionMode) {
+    traceSelectionRegistry("setSelectionClasses-before-apply", selectableBlocks);
+  }
+
+  selectableBlocks.forEach((record) => {
+    const outer = record.element;
+    const selected = selection.has(record.key);
     outer.classList.add("vellix-selectable-block");
     outer.classList.toggle("vellix-selected-block", selected);
+    outer.setAttribute("data-vellix-selection-block", "true");
+    outer.setAttribute("data-vellix-selection-key", record.key);
+    outer.setAttribute("data-vellix-selection-node-type", record.node.type.name);
+    outer.setAttribute("data-vellix-selection-index", String(record.index));
+    outer.setAttribute("data-vellix-selection-path", pathKey(record.path));
     outer.setAttribute("data-vellix-selected", selected ? "true" : "false");
+    outer.style.setProperty("--vellix-selection-y", `${selectionIndicatorOffset(outer)}px`);
+    setSelectionHighlightProperties(outer);
   });
 
   if (lastSelectionCount !== selection.size) {
     lastSelectionCount = selection.size;
     postToSwift("selection", { count: selection.size });
   }
+  scheduleSelectionDecorationRefresh();
 }
 
 function setSelectionMode(mode) {
   const nextMode = mode === "single" || mode === "multi" ? mode : "off";
+  const previousMode = selectionMode;
+  const isExitingSelectionMode = previousMode !== "off" && nextMode === "off";
   selectionMode = nextMode;
   if (selectionMode === "off") selection.clear();
-  editor.commands.blur();
+  if (selectionMode !== "off") {
+    editor.commands.blur();
+  }
   setSelectionClasses();
+  if (isExitingSelectionMode) {
+    clearProseMirrorNodeSelectionForSelectionExit();
+  }
+  if (previousMode !== selectionMode) {
+    postToSwift("selectionMode", { mode: selectionMode });
+  }
 }
 
-function toggleBlockSelection(blockId) {
-  if (!blockId || selectionMode === "off") return;
+function toggleBlockSelection(selectionKey) {
+  if (!selectionKey || selectionMode === "off") return;
   if (selectionMode === "single") {
     selection.clear();
-    selection.add(blockId);
-  } else if (selection.has(blockId)) {
-    selection.delete(blockId);
+    selection.add(selectionKey);
+  } else if (selection.has(selectionKey)) {
+    selection.delete(selectionKey);
   } else {
-    selection.add(blockId);
+    selection.add(selectionKey);
   }
   setSelectionClasses();
   postToSwift("haptic", { style: "light" });
+}
+
+function clearProseMirrorNodeSelectionForSelectionExit() {
+  const currentSelection = editor.state.selection;
+  if (!(currentSelection instanceof NodeSelection) && !(currentSelection instanceof AllSelection)) {
+    editor.commands.blur();
+    return;
+  }
+
+  try {
+    const pos = Math.max(0, Math.min(currentSelection.from, editor.state.doc.content.size));
+    const nextSelection = TextSelection.near(editor.state.doc.resolve(pos), 1);
+    editor.view.dispatch(editor.state.tr.setSelection(nextSelection));
+  } catch (_error) {
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.atStart(editor.state.doc)));
+  }
+
+  editor.commands.blur();
+  window.getSelection?.()?.removeAllRanges?.();
 }
 
 function reportContentHeight() {
@@ -1109,7 +1924,9 @@ function reportContentHeight() {
   let height = 60;
   if (root && measured.length > 0) {
     const top = root.getBoundingClientRect().top;
-    const bottom = Math.max(...measured.map((el) => el.getBoundingClientRect().bottom));
+    const bottom = Math.max(
+      ...measured.map((el) => el.getBoundingClientRect().bottom),
+    );
     height = Math.max(60, Math.ceil(bottom - top + 2));
   }
 
@@ -1117,15 +1934,71 @@ function reportContentHeight() {
     lastHeight = height;
     postToSwift("height", { height });
   }
+
+  reportPageBreakRegions(root);
+}
+
+function reportPageBreakRegions(root) {
+  if (!root) return;
+  const rootRect = root.getBoundingClientRect();
+  const regions = Array.from(
+    root.querySelectorAll("[data-vellix-page-break], [data-type='pageBreak'], [data-page-break]"),
+  )
+    .filter((element) => {
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+    })
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        y: Math.max(0, Math.round((rect.top - rootRect.top) * 10) / 10),
+        height: Math.max(0, Math.round(rect.height * 10) / 10),
+      };
+    });
+  const signature = JSON.stringify(regions);
+  if (signature === lastPageBreakSignature) return;
+  lastPageBreakSignature = signature;
+  postToSwift("pageBreaks", { regions });
 }
 
 function selectedBlocks() {
-  const blocks = topLevelDocumentBlocks(editor.getJSON()).filter((block) => selection.has(nodeId(block)));
+  const blocks = topLevelModelBlocks()
+    .filter((block) => selection.has(block.key))
+    .map((block) => block.json);
   if (!blocks.length) {
     postToSwift("error", { message: "Select at least one block first." });
     return null;
   }
   return blocks;
+}
+
+function selectedBlockIndexMap() {
+  return topLevelModelBlocks().reduce((map, block) => {
+    if (selection.has(block.key)) map.set(pathKey(block.path), block);
+    return map;
+  }, new Map());
+}
+
+function transformSelectedTopLevelBlocks(transform) {
+  const selectedByPath = selectedBlockIndexMap();
+  if (!selectedByPath.size) {
+    postToSwift("error", { message: "Select at least one block first." });
+    return false;
+  }
+  const nextDocument = normalizeTipTapDocument(editor.getJSON());
+  const transformNodes = (nodes, parentPath = []) => nodes.flatMap((node, index) => {
+    const path = [...parentPath, index];
+    const selectedBlock = selectedByPath.get(pathKey(path));
+    const nodeWithChildren =
+      node.content && !selectedBlock
+        ? { ...node, content: transformNodes(node.content, path) }
+        : node;
+    const transformed = selectedBlock ? transform(nodeWithChildren, selectedBlock) : nodeWithChildren;
+    return transformed ? [transformed] : [];
+  });
+  nextDocument.content = transformNodes(nextDocument.content);
+  commitDocument(nextDocument);
+  return true;
 }
 
 function walkTransform(nodes, transform) {
@@ -1200,34 +2073,32 @@ function transformNodeToBlock(node, type, payload = {}) {
 }
 
 function transformSelectedBlocks(type, payload = {}) {
-  if (!selectedBlocks()) return;
-  const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content = walkTransform(nextDocument.content, (node) =>
-    selection.has(nodeId(node)) ? transformNodeToBlock(node, type, payload) : node,
-  );
-  commitDocument(nextDocument);
+  transformSelectedTopLevelBlocks((node) => transformNodeToBlock(node, type, payload));
 }
 
 function updateSelectedCalloutColor(color) {
-  if (!selectedBlocks()) return;
-  const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content = walkTransform(nextDocument.content, (node) => {
-    if (!selection.has(nodeId(node))) return node;
+  transformSelectedTopLevelBlocks((node) => {
     const callout = transformNodeToBlock(node, "callout", { color });
     return { ...callout, attrs: { ...callout.attrs, color } };
   });
-  commitDocument(nextDocument);
 }
 
 function updateCalloutIcon(blockId, icon) {
-  const targets = new Set(blockId ? [blockId] : selection);
-  if (!targets.size && !selectedBlocks()) return;
+  const selectedByPath = selectedBlockIndexMap();
+  if (!blockId && !selectedByPath.size) {
+    postToSwift("error", { message: "Select at least one block first." });
+    return;
+  }
   const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content = walkTransform(nextDocument.content, (node) =>
-    targets.has(nodeId(node)) && node.type === "callout"
-      ? { ...node, attrs: { ...node.attrs, icon: icon || DEFAULT_CALLOUT_ICON } }
-      : node,
-  );
+  const updateNodes = (nodes, parentPath = []) => nodes.map((node, index) => {
+    const path = [...parentPath, index];
+    const isTarget = blockId ? nodeId(node) === blockId : selectedByPath.has(pathKey(path));
+    const nodeWithChildren = node.content ? { ...node, content: updateNodes(node.content, path) } : node;
+    return isTarget && node.type === "callout"
+      ? { ...nodeWithChildren, attrs: { ...nodeWithChildren.attrs, icon: icon || DEFAULT_CALLOUT_ICON } }
+      : nodeWithChildren;
+  });
+  nextDocument.content = updateNodes(nextDocument.content);
   commitDocument(nextDocument);
 }
 
@@ -1257,11 +2128,7 @@ function setMarkOnNode(node, markType, enabled) {
 }
 
 function formatSelectedBlocks(action, value = null) {
-  if (!selectedBlocks()) return;
-  const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content = walkTransform(nextDocument.content, (node) => {
-    if (!selection.has(nodeId(node))) return node;
-
+  transformSelectedTopLevelBlocks((node) => {
     switch (action) {
       case "codeUnderline": {
         const texts = textNodesIn(node);
@@ -1293,24 +2160,42 @@ function formatSelectedBlocks(action, value = null) {
         return node;
     }
   });
-  commitDocument(nextDocument);
 }
 
 function deleteSelected() {
-  if (!selectedBlocks()) return;
+  const selectedByPath = selectedBlockIndexMap();
+  if (!selectedByPath.size) {
+    postToSwift("error", { message: "Select at least one block first." });
+    return;
+  }
   const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content = walkTransform(nextDocument.content, (node) =>
-    selection.has(nodeId(node)) ? null : node,
-  );
+  const deleteNodes = (nodes, parentPath = []) => nodes.flatMap((node, index) => {
+    const path = [...parentPath, index];
+    if (selectedByPath.has(pathKey(path))) return [];
+    if (!node.content) return [node];
+    const content = deleteNodes(node.content, path);
+    if (listContainerType(node.type) && !content.length) return [];
+    return [{ ...node, content }];
+  });
+  nextDocument.content = deleteNodes(nextDocument.content);
   selection.clear();
   commitDocument(nextDocument.content.length ? nextDocument : normalizeTipTapDocument(null));
 }
 
 function duplicateSelected() {
-  const blocks = selectedBlocks();
-  if (!blocks) return;
+  const selectedByPath = selectedBlockIndexMap();
+  if (!selectedByPath.size) {
+    postToSwift("error", { message: "Select at least one block first." });
+    return;
+  }
   const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content.push(...blocks.map((block) => normalizeTipTapNode(JSON.parse(JSON.stringify(block)))));
+  const duplicateNodes = (nodes, parentPath = []) => nodes.flatMap((node, index) => {
+    const path = [...parentPath, index];
+    const nodeWithChildren = node.content ? { ...node, content: duplicateNodes(node.content, path) } : node;
+    if (!selectedByPath.has(pathKey(path))) return [nodeWithChildren];
+    return [nodeWithChildren, normalizeTipTapNode(JSON.parse(JSON.stringify(nodeWithChildren)))];
+  });
+  nextDocument.content = duplicateNodes(nextDocument.content);
   selection.clear();
   commitDocument(nextDocument);
 }
@@ -1386,7 +2271,17 @@ function blockNodeForKey(key) {
     case "codeBlock":
       return { type: "codeBlock", attrs: { id: id() } };
     case "divider":
-      return { type: "divider", attrs: { id: id() } };
+      return { type: "divider", attrs: { id: id(), style: DEFAULT_DIVIDER_STYLE } };
+    case "divider:dottedCircles":
+    case "divider:tinyDots":
+      return { type: "divider", attrs: { id: id(), style: "dottedCircles" } };
+    case "divider:thickLine":
+      return { type: "divider", attrs: { id: id(), style: "thickLine" } };
+    case "divider:thinLine":
+      return { type: "divider", attrs: { id: id(), style: "thinLine" } };
+    case "divider:fourCircles":
+    case "divider:fourDots":
+      return { type: "divider", attrs: { id: id(), style: "fourCircles" } };
     case "pageBreak":
       return { type: "pageBreak", attrs: { id: id() } };
     case "paragraph":
@@ -1406,13 +2301,8 @@ function insertBlockByKey(key, range = null) {
   return inserted;
 }
 
-const slashMenu = document.createElement("div");
-slashMenu.className = "vellix-slash-menu";
-slashMenu.hidden = true;
-slashMenu.setAttribute("role", "listbox");
-document.body.appendChild(slashMenu);
-
 let slashState = null;
+let slashMenuVisible = false;
 
 function slashRangeAtSelection() {
   const { $from } = editor.state.selection;
@@ -1437,8 +2327,9 @@ function filteredSlashItems(query) {
 
 function hideSlashMenu() {
   slashState = null;
-  slashMenu.hidden = true;
-  slashMenu.replaceChildren();
+  slashMenuVisible = false;
+  postToSwift("slashMenu", { visible: false });
+  requestAnimationFrame(reportContentHeight);
 }
 
 function renderSlashMenu() {
@@ -1450,54 +2341,43 @@ function renderSlashMenu() {
   }
 
   slashState.index = Math.max(0, Math.min(slashState.index, items.length - 1));
-  slashMenu.replaceChildren(
-    ...items.map((item, index) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "vellix-slash-item";
-      button.dataset.active = index === slashState.index ? "true" : "false";
-      button.dataset.key = item.key;
-      button.setAttribute("role", "option");
-      const iconStyle = cssBackgroundImageSource(iconSource(item.icon, "#ffffff", 24));
-      button.innerHTML = `
-        <span class="vellix-slash-icon" style="--vellix-slash-icon: ${iconStyle};"></span>
-        <span class="vellix-slash-copy">
-          <span class="vellix-slash-title">${item.title}</span>
-          <span class="vellix-slash-detail">${item.detail}</span>
-        </span>
-      `;
-      button.addEventListener("mousedown", (event) => event.preventDefault());
-      button.addEventListener("click", () => chooseSlashItem(item.key));
-      return button;
-    }),
-  );
-
-  slashMenu.hidden = false;
+  slashMenuVisible = true;
 
   const visualViewport = window.visualViewport;
   const viewportLeft = visualViewport?.offsetLeft ?? 0;
   const viewportTop = visualViewport?.offsetTop ?? 0;
   const viewportWidth = visualViewport?.width ?? window.innerWidth;
-  const viewportHeight = visualViewport?.height ?? window.innerHeight;
   const coords = editor.view.coordsAtPos(slashState.range.to);
-  const menuWidth = slashMenu.offsetWidth || 320;
-  const menuHeight = slashMenu.offsetHeight || 240;
+  const rowHeight = 62;
+  const visibleRows = Math.min(items.length, 5);
+  const naturalMaxHeight = 14 + visibleRows * rowHeight;
+  const menuMaxHeight = Math.min(324, naturalMaxHeight);
+  const menuWidth = Math.min(342, Math.max(280, viewportWidth - 28));
   const gutter = 14;
-  const topGutter = 8;
+  const topGutter = 10;
   const viewportRight = viewportLeft + viewportWidth;
-  const viewportBottom = viewportTop + viewportHeight;
   const left = Math.min(
     viewportRight - menuWidth - gutter,
     Math.max(viewportLeft + gutter, coords.left),
   );
-  const top = Math.max(
-    viewportTop + topGutter,
-    Math.min(coords.bottom + topGutter, viewportBottom - menuHeight - topGutter),
-  );
+  const top = Math.max(viewportTop + topGutter, coords.bottom + topGutter);
 
-  slashMenu.style.maxHeight = `${Math.max(160, Math.min(430, viewportHeight - 24))}px`;
-  slashMenu.style.left = `${left}px`;
-  slashMenu.style.top = `${top}px`;
+  postToSwift("slashMenu", {
+    visible: true,
+    query: slashState.query,
+    selectedIndex: slashState.index,
+    anchorX: left,
+    anchorY: top,
+    width: menuWidth,
+    maxHeight: menuMaxHeight,
+    items: items.map((item) => ({
+      key: item.key,
+      title: item.title,
+      detail: item.detail,
+      icon: item.icon,
+    })),
+  });
+  requestAnimationFrame(reportContentHeight);
 }
 
 function updateSlashMenu() {
@@ -1519,7 +2399,7 @@ function chooseSlashItem(key) {
   const range = slashState.range;
   hideSlashMenu();
   if (key === "inlineCode") {
-    return editor.chain().focus().deleteRange(range).toggleMark("code").toggleMark("underline").run();
+    return editor.chain().focus().deleteRange(range).toggleMark("code").run();
   }
   if (key === "underline") {
     return editor.chain().focus().deleteRange(range).toggleMark("underline").run();
@@ -1530,15 +2410,22 @@ function chooseSlashItem(key) {
 editor.on("selectionUpdate", updateSlashMenu);
 editor.on("update", updateSlashMenu);
 
+// ProseMirror re-renders nodeViews (especially inside taskLists) on every doc
+// change, which wipes DOM attributes we set for selection UI. Re-apply the
+// selection classes whenever the document changes while selection mode is on.
+editor.on("update", () => {
+  if (selectionMode !== "off") setSelectionClasses();
+});
+
 window.visualViewport?.addEventListener("resize", () => {
-  if (slashState && !slashMenu.hidden) renderSlashMenu();
+  if (slashState && slashMenuVisible) renderSlashMenu();
 });
 window.visualViewport?.addEventListener("scroll", () => {
-  if (slashState && !slashMenu.hidden) renderSlashMenu();
+  if (slashState && slashMenuVisible) renderSlashMenu();
 });
 
 document.addEventListener("keydown", (event) => {
-  if (!slashState || slashMenu.hidden) return;
+  if (!slashState || !slashMenuVisible) return;
   const items = filteredSlashItems(slashState.query);
   if (!items.length) return;
 
@@ -1560,12 +2447,22 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("mousedown", (event) => {
-  if (event.target.closest?.(".vellix-callout-icon-button")) {
+  if (selectionMode === "off" && event.target.closest?.(".vellix-callout-icon-button")) {
     event.preventDefault();
   }
 });
 
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    handleSelectionHandleEvent(event);
+  },
+  { capture: true },
+);
+
 document.addEventListener("click", (event) => {
+  if (selectionMode !== "off" && handleSelectionHandleEvent(event)) return;
+
   const iconButton = event.target.closest?.(".vellix-callout-icon-button");
   if (iconButton) {
     const callout = iconButton.closest(".vellix-callout");
@@ -1579,13 +2476,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const block = event.target.closest?.("[data-vellix-block-id]");
-  if (!block || selectionMode === "off") return;
+  if (selectionMode === "off") return;
 
-  event.preventDefault();
-  event.stopPropagation();
-  const blockId = block.dataset.vellixBlockId;
-  toggleBlockSelection(blockId);
+  if (editor.view.dom.contains(event.target)) return;
 });
 
 const resizeObserver = new ResizeObserver(() => requestAnimationFrame(reportContentHeight));
@@ -1601,12 +2494,10 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
         editor.commands.setContent(normalizedDocument, { emitUpdate: false });
         traceCalloutAttrs("command-setContent-after-setContent", editor.getJSON());
 	      }
-	      selection.clear();
-	      selectionMode = "off";
-	      renderCalloutIcons();
-	      setSelectionClasses();
-      requestAnimationFrame(reportContentHeight);
-      return true;
+		      setSelectionMode("off");
+		      renderCalloutIcons();
+	      requestAnimationFrame(reportContentHeight);
+	      return true;
     case "setEditable":
       editor.setEditable(args.editable === true, false);
       return true;
@@ -1633,7 +2524,7 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
           setRegisteredIconCSSVariable(icon, src);
           traceDiag("icon-asset-registered", { icon, bytes: src.length });
           renderCalloutIcons();
-          if (slashState && !slashMenu.hidden) renderSlashMenu();
+          if (slashState && slashMenuVisible) renderSlashMenu();
         }
       }
       return true;
@@ -1651,11 +2542,13 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
         }
         traceDiag("icon-assets-registered-bulk", { count: registered });
         renderCalloutIcons();
-        if (slashState && !slashMenu.hidden) renderSlashMenu();
+        if (slashState && slashMenuVisible) renderSlashMenu();
       }
       return true;
+    case "chooseSlashItem":
+      return chooseSlashItem(args.key || "");
     case "insertDivider":
-      insertNode({ type: "divider", attrs: { id: id() } });
+      insertNode({ type: "divider", attrs: { id: id(), style: normalizedDividerStyle(args.style) } });
       return true;
     case "insertPageBreak":
       insertNode({ type: "pageBreak", attrs: { id: id() } });
@@ -1692,18 +2585,16 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
     case "outdentSelectedBlocks":
       return chain.liftListItem("listItem").run() || chain.liftListItem("taskItem").run();
 	    case "selectAllBlocks":
-	      selectionMode = "multi";
+	      setSelectionMode("multi");
 	      selection.clear();
-	      topLevelDocumentBlocks(editor.getJSON()).forEach((block) => selection.add(nodeId(block)));
+	      topLevelModelBlocks().forEach((block) => selection.add(block.key));
 	      setSelectionClasses();
 	      return true;
 	    case "setSelectionMode":
 	      setSelectionMode(args.mode);
 	      return true;
 	    case "clearBlockSelection":
-	      selection.clear();
-	      selectionMode = "off";
-	      setSelectionClasses();
+	      setSelectionMode("off");
 	      return true;
     case "deleteSelectedBlocks":
       deleteSelected();

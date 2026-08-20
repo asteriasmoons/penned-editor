@@ -35,6 +35,9 @@
           sans-serif;
         --vellix-selection-fill: #0d5668;
         --vellix-selection-dot: #2ecbff;
+        --vellix-selection-soft: rgba(46, 203, 255, 0.12);
+        --vellix-selection-softer: rgba(46, 203, 255, 0.075);
+        --vellix-selection-edge: rgba(46, 203, 255, 0.28);
         --vellix-icon-chevright: url("vellix-icon://asset/chevright?tint=%23FFFFFF&size=22");
         --vellix-icon-chevdown: url("vellix-icon://asset/chevdown?tint=%23FFFFFF&size=22");
         --vellix-icon-chevup: url("vellix-icon://asset/chevup?tint=%23FFFFFF&size=22");
@@ -123,6 +126,11 @@
         touch-action: pan-y;
       }
 
+      .tiptap-editor [data-vellix-selection-block="true"] {
+        position: relative;
+        z-index: 0;
+      }
+
       .tiptap-editor p,
       .tiptap-editor li,
       .tiptap-editor blockquote,
@@ -209,7 +217,7 @@
         }
       }
 
-      ::selection {
+      .tiptap-editor ::selection {
         background: rgb(128 0 254 / 35%);
       }
 
@@ -245,9 +253,6 @@
         background: rgba(255, 255, 255, 0.12);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
         font-size: 0.92em;
-        text-decoration-line: underline;
-        text-decoration-thickness: 1px;
-        text-underline-offset: 3px;
       }
 
       .vellix-callout {
@@ -344,79 +349,180 @@
       .tiptap-editor [data-type="taskItem"] {
         display: flex;
         align-items: flex-start;
-        min-height: 24px;
+        min-height: 30px;
         list-style: none;
+        text-align: left !important;
       }
 
-      /* Checklist: hollow outlined circle when unchecked, filled circle when
-         checked. No pseudo-element overlays, no double-borders, no hidden
-         input — the input itself IS the visible circle. */
+      /* Checklist: keep TipTap's native checkbox for state, but draw the
+         visible control ourselves so iOS WebKit cannot repaint it as a system
+         checkbox. */
       .tiptap-editor [data-type="taskItem"] > label {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         width: 22px;
         min-width: 22px;
-        min-height: 30px;
+        height: var(--vellix-task-first-line-height, 22px);
+        min-height: var(--vellix-task-first-line-height, 22px);
         margin: 0 10px 0 0;
         padding: 0;
       }
 
-      /* iOS 17+ keeps the native checkbox look unless we override BOTH
-         appearance properties AND supply an explicit background-image (even
-         a transparent one), so the system renderer bails out. Every property
-         is !important to defeat the UA stylesheet. */
       .tiptap-editor [data-type="taskItem"] > label input[type="checkbox"] {
-        display: inline-block !important;
-        width: 19px !important;
-        min-width: 19px !important;
-        height: 19px !important;
-        margin: 5px 0 0 0 !important;
+        position: absolute !important;
+        width: 1px !important;
+        min-width: 1px !important;
+        height: 1px !important;
+        margin: 0 !important;
         padding: 0 !important;
-        vertical-align: middle !important;
+        opacity: 0 !important;
+        overflow: hidden !important;
         appearance: none !important;
         -webkit-appearance: none !important;
+        background-image: none !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        outline: none !important;
+        pointer-events: none !important;
+      }
+
+      .tiptap-editor [data-type="taskItem"] > label > span {
+        position: static !important;
+        display: block !important;
+        flex: 0 0 19px !important;
+        width: 19px !important;
+        height: 19px !important;
+        min-width: 19px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        clip: auto !important;
+        clip-path: none !important;
+        white-space: nowrap !important;
+        color: transparent !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
         background-color: transparent !important;
         background-image: none !important;
-        background-clip: padding-box !important;
+        background-position: center !important;
+        background-repeat: no-repeat !important;
+        background-size: 13px 13px !important;
         border: 2px solid color-mix(in srgb, var(--vellix-primary-text) 55%, transparent) !important;
         border-radius: 50% !important;
         box-shadow: none !important;
-        outline: none !important;
-        cursor: pointer;
         transition: background-color 120ms ease, border-color 120ms ease;
       }
 
-      .tiptap-editor [data-type="taskItem"] > label input[type="checkbox"]:checked {
+      .tiptap-editor [data-type="taskItem"] > label input[type="checkbox"]:checked + span {
         background-color: var(--vellix-selection-dot) !important;
+        background-image: var(--vellix-icon-checkwavy) !important;
         border-color: var(--vellix-selection-dot) !important;
-      }
-
-      /* Hide the sibling <span> TipTap injects next to the checkbox — it's
-         only used for legacy label text and adds an empty column on iOS. */
-      .tiptap-editor [data-type="taskItem"] > label > span {
-        display: none !important;
       }
 
       .tiptap-editor [data-type="taskItem"] > div {
         min-width: 0;
+        width: 100%;
         flex: 1 1 auto;
+        display: block;
+        min-height: var(--vellix-task-first-line-height, 22px);
         padding-top: 0;
+        text-align: left !important;
       }
 
-      .tiptap-editor hr[data-vellix-divider] {
-        margin: 18px 0 !important;
+      .tiptap-editor [data-type="taskItem"] > div > p {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        line-height: var(--vellix-task-first-line-height, 22px) !important;
+        text-align: left !important;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .tiptap-editor [data-vellix-divider] {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        min-height: 30px !important;
+        margin: 4px 0 !important;
         border: 0 !important;
-        border-top: 1px solid #ffffff1a !important;
       }
 
-      .tiptap-editor [data-vellix-page-break] {
-        height: 32px !important;
-        margin: 12px 0 !important;
-        background: #20202080;
-        border: 1px solid #ffffff14 !important;
-        border-radius: 28px;
-        box-shadow: 0 12px 28px #00000029;
+      .tiptap-editor .vellix-divider-line {
+        display: block;
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+      }
+
+      .tiptap-editor [data-divider-style="thinLine"] .vellix-divider-line {
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #ffffff24 10%, #ffffff24 90%, transparent);
+      }
+
+      .tiptap-editor [data-divider-style="thickLine"] .vellix-divider-line {
+        width: min(86%, 520px);
+        height: 8px;
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      .tiptap-editor .vellix-divider-dots {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: min(88%, 560px);
+      }
+
+      .tiptap-editor .vellix-divider-dot {
+        display: block;
+        width: 5px;
+        height: 5px;
+        flex: 0 0 5px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.28);
+      }
+
+      .tiptap-editor .vellix-divider-four-circles {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+      }
+
+      .tiptap-editor .vellix-divider-circle {
+        display: block;
+        width: 10px;
+        height: 10px;
+        flex: 0 0 10px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.34);
+      }
+
+      .tiptap-editor [data-vellix-page-break],
+      .tiptap-editor [data-type="pageBreak"],
+      .tiptap-editor [data-page-break] {
+        display: block;
+        width: 100%;
+        height: 128px !important;
+        margin: 28px 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+        border: 0 !important;
+        border-radius: 0;
+        box-shadow: none !important;
+        color: transparent !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+        overflow: hidden;
+      }
+
+      .tiptap-editor [data-vellix-page-break] > *,
+      .tiptap-editor [data-type="pageBreak"] > *,
+      .tiptap-editor [data-page-break] > * {
+        display: none !important;
       }
 
       .tiptap-editor [data-vellix-toggle] {
@@ -500,83 +606,6 @@
         border-radius: 16px;
       }
 
-      .vellix-slash-menu {
-        position: fixed;
-        z-index: 9999;
-        width: min(342px, calc(100vw - 28px));
-        max-height: min(430px, calc(100vh - 40px));
-        padding: 7px;
-        overflow-y: auto;
-        color: #fff;
-        background: rgba(30, 30, 30, 0.96);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 22px;
-        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.44);
-        -webkit-backdrop-filter: blur(24px);
-        backdrop-filter: blur(24px);
-      }
-
-      .vellix-slash-menu[hidden] {
-        display: none;
-      }
-
-      .vellix-slash-item {
-        display: grid;
-        grid-template-columns: 38px minmax(0, 1fr);
-        gap: 11px;
-        align-items: center;
-        width: 100%;
-        min-height: 50px;
-        padding: 6px 9px;
-        color: inherit;
-        text-align: left;
-        background: transparent;
-        border: 0;
-        border-radius: 16px;
-      }
-
-      .vellix-slash-item[data-active="true"] {
-        background: rgba(255, 255, 255, 0.12);
-      }
-
-      .vellix-slash-icon {
-        display: block;
-        width: 34px;
-        height: 34px;
-        background: rgba(255, 255, 255, 0.10);
-        background-image: var(--vellix-slash-icon);
-        background-position: center;
-        background-repeat: no-repeat;
-        background-size: 21px 21px;
-        border-radius: 14px;
-      }
-
-      .vellix-slash-copy {
-        display: block;
-        min-width: 0;
-        overflow: hidden;
-      }
-
-      .vellix-slash-title,
-      .vellix-slash-detail {
-        display: block;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .vellix-slash-title {
-        font-size: 15px;
-        font-weight: 750;
-      }
-
-      .vellix-slash-detail {
-        margin-top: 2px;
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.55);
-      }
-
       html:not(.vellix-selection-mode) .tiptap-editor,
       html:not(.vellix-selection-mode) .tiptap-editor [data-vellix-block-id] {
         -webkit-user-select: text !important;
@@ -588,43 +617,68 @@
         user-select: none !important;
       }
 
-      .vellix-selection-mode .tiptap-editor .vellix-selectable-block {
-        padding-right: 36px;
-      }
-
-      .vellix-selection-mode .tiptap-editor .vellix-selectable-block::after {
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-block="true"]::after {
         position: absolute;
-        top: 50%;
-        right: 2px;
+        top: var(--vellix-selection-y, 50%);
+        right: 9px;
         z-index: 3;
-        width: 24px;
-        height: 24px;
+        width: 16px;
+        height: 16px;
         pointer-events: none;
         background: transparent;
-        border: 2px solid rgba(255, 255, 255, 0.16);
+        border: 1.5px solid rgba(255, 255, 255, 0.32);
         border-radius: 50%;
-        box-shadow: inset 0 0 0 2px rgb(0 0 0 / 38%), 0 0 0 1px rgb(0 0 0 / 45%);
+        box-shadow: none;
         transform: translateY(-50%);
+        transition: background-color 120ms ease, border-color 120ms ease;
         content: "";
       }
 
-      .vellix-selection-mode .vellix-selected-block::before,
-      .vellix-selection-mode [data-vellix-selected="true"]::before {
-        position: absolute;
-        inset: -4px 32px -4px -4px;
-        z-index: -1;
-        pointer-events: none;
-        background: rgba(46, 203, 255, 0.14);
-        border-radius: 10px;
-        box-shadow: inset 0 0 0 1px rgb(46 203 255 / 20%);
-        content: "";
+      .vellix-selection-mode .tiptap-editor .vellix-selected-text-decoration {
+        padding: 0.06em 0.14em 0.08em;
+        background: color-mix(in srgb, var(--vellix-selection-dot) 34%, transparent);
+        border-radius: 4px;
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
       }
 
-      .vellix-selection-mode .vellix-selected-block::after,
-      .vellix-selection-mode [data-vellix-selected="true"]::after {
-        background: var(--vellix-selection-dot) !important;
+      .vellix-selection-mode .tiptap-editor [data-type="taskItem"] .vellix-selected-text-decoration {
+        margin-left: -3px;
+        padding-left: 3px;
+      }
+
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-line {
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(46, 203, 255, 0.3) 12%,
+          rgba(46, 203, 255, 0.42) 50%,
+          rgba(46, 203, 255, 0.3) 88%,
+          transparent
+        );
+        box-shadow: 0 0 8px rgba(46, 203, 255, 0.18);
+      }
+
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-divider-style="thinLine"][data-vellix-selected="true"] .vellix-divider-line {
+        height: 2px;
+      }
+
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-divider-style="thickLine"][data-vellix-selected="true"] .vellix-divider-line {
+        height: 8px;
+      }
+
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-dot,
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-circle {
+        background: rgba(46, 203, 255, 0.58);
+        box-shadow: 0 0 8px rgba(46, 203, 255, 0.18);
+      }
+
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-block="true"][data-vellix-selected="true"]::after {
+        background:
+          radial-gradient(circle, rgba(18, 45, 56, 0.82) 0 3.25px, transparent 3.75px),
+          var(--vellix-selection-dot) !important;
         border-color: var(--vellix-selection-dot) !important;
-        box-shadow: none !important;
+        box-shadow: 0 0 0 3px rgba(46, 203, 255, 0.1) !important;
       }
     </style>
   </head>
