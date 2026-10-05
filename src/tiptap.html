@@ -501,17 +501,24 @@
         background: rgba(255, 255, 255, 0.34);
       }
 
-      .tiptap-editor [data-vellix-page-break],
-      .tiptap-editor [data-type="pageBreak"],
-      .tiptap-editor [data-page-break] {
+      /* The pageBreak node is only a transparent structural boundary.
+         SwiftUI uses its reported bounds to split the native page sheets,
+         matching the journal editor's page-segmentation model. */
+      :root {
+        --vellix-page-gap: 44px;
+      }
+
+      .tiptap-editor.ProseMirror > [data-vellix-page-break],
+      .tiptap-editor.ProseMirror > [data-type="pageBreak"],
+      .tiptap-editor.ProseMirror > [data-page-break] {
         display: block;
         width: 100%;
-        height: 128px !important;
-        margin: 28px 0 !important;
+        height: var(--vellix-page-gap) !important;
+        margin: 0 !important;
         padding: 0 !important;
         background: transparent !important;
         border: 0 !important;
-        border-radius: 0;
+        border-radius: 0 !important;
         box-shadow: none !important;
         color: transparent !important;
         font-size: 0 !important;
@@ -523,6 +530,18 @@
       .tiptap-editor [data-type="pageBreak"] > *,
       .tiptap-editor [data-page-break] > * {
         display: none !important;
+      }
+
+      .tiptap-editor.ProseMirror > *:has(+ [data-vellix-page-break]),
+      .tiptap-editor.ProseMirror > *:has(+ [data-type="pageBreak"]),
+      .tiptap-editor.ProseMirror > *:has(+ [data-page-break]) {
+        padding-bottom: 20px !important;
+      }
+
+      .tiptap-editor.ProseMirror > [data-vellix-page-break] + *,
+      .tiptap-editor.ProseMirror > [data-type="pageBreak"] + *,
+      .tiptap-editor.ProseMirror > [data-page-break] + * {
+        padding-top: 20px !important;
       }
 
       .tiptap-editor [data-vellix-toggle] {

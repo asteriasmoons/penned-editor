@@ -410,6 +410,68 @@ function normalizeTipTapNode(value) {
   return content ? { type, attrs, content } : { type, attrs };
 }
 
+function hoistPageBreaks(nodes) {
+  return nodes.flatMap((node) => {
+    if (node.type === "pageBreak" || !Array.isArray(node.content)) {
+      return [node];
+    }
+
+    const content = hoistPageBreaks(node.content);
+    if (!content.some((child) => child.type === "pageBreak")) {
+      return [{ ...node, content }];
+    }
+
+    const result = [];
+    let chunk = [];
+    let chunkIndex = 0;
+    const appendChunk = () => {
+      if (!chunk.length) return;
+      const attrs = {
+        ...(node.attrs || {}),
+        ...(chunkIndex > 0 ? { id: id() } : {}),
+      };
+      result.push({ ...node, attrs, content: chunk });
+      chunk = [];
+      chunkIndex += 1;
+    };
+
+    content.forEach((child) => {
+      if (child.type === "pageBreak") {
+        appendChunk();
+        result.push(child);
+      } else {
+        chunk.push(child);
+      }
+    });
+    appendChunk();
+    return result;
+  });
+}
+
+function normalizedDocumentContent(content) {
+  const hoisted = hoistPageBreaks(content);
+  const cleaned = hoisted.filter((node, index) => {
+    if (node.type !== "blockquote" || plainText(node).trim()) return true;
+    return !(
+      hoisted[index - 1]?.type === "pageBreak" ||
+      hoisted[index + 1]?.type === "pageBreak"
+    );
+  });
+  const result = [];
+
+  cleaned.forEach((node, index) => {
+    result.push(node);
+    if (
+      node.type === "pageBreak" &&
+      (!cleaned[index + 1] || cleaned[index + 1].type === "pageBreak")
+    ) {
+      result.push(paragraph());
+    }
+  });
+
+  return result.length ? result : [paragraph()];
+}
+
 function importLegacyBlock(value) {
   if (!isRecord(value)) {
     return paragraph();
@@ -497,24 +559,35 @@ function normalizeTipTapDocument(value) {
       const content = Array.isArray(value.content)
         ? value.content.map(normalizeTipTapNode).filter((node) => node.type !== "doc")
         : [];
-      return { type: "doc", content: content.length ? content : [paragraph()] };
+      return { type: "doc", content: normalizedDocumentContent(content) };
     }
 
     if (Array.isArray(value.blocks)) {
-      return { type: "doc", content: value.blocks.map(importLegacyBlock) };
+      return { type: "doc", content: normalizedDocumentContent(value.blocks.map(importLegacyBlock)) };
     }
 
     if (Array.isArray(value.content)) {
       const content = value.content.map(normalizeTipTapNode).filter((node) => node.type !== "doc");
-      return { type: "doc", content: content.length ? content : [paragraph()] };
+      return { type: "doc", content: normalizedDocumentContent(content) };
     }
   }
 
   if (Array.isArray(value)) {
-    return { type: "doc", content: value.map(importLegacyBlock) };
+    return { type: "doc", content: normalizedDocumentContent(value.map(importLegacyBlock)) };
   }
 
   return { type: "doc", content: [paragraph()] };
+}
+
+function normalizeLoadedTipTapDocument(value) {
+  const documentJSON = normalizeTipTapDocument(value);
+  const content = documentJSON.content.filter(
+    (node) => node.type !== "blockquote" || plainText(node).trim(),
+  );
+  return {
+    ...documentJSON,
+    content: normalizedDocumentContent(content),
+  };
 }
 
 function documentBlocks(source) {
@@ -913,11 +986,18 @@ const Divider = Node.create({
   },
 });
 
+const VellixDocument = Node.create({
+  name: "doc",
+  topNode: true,
+  content: "(block | pageBoundary)+",
+});
+
 const PageBreak = Node.create({
   name: "pageBreak",
-  group: "block",
+  group: "pageBoundary",
   atom: true,
   selectable: true,
+  isolating: true,
   addAttributes() {
     return { id: { default: null } };
   },
@@ -936,6 +1016,23 @@ const PageBreak = Node.create({
         "aria-hidden": "true",
       }),
     ];
+  },
+  addKeyboardShortcuts() {
+    const deleteSelectedPageBreak = ({ editor: nodeEditor }) => {
+      const { selection: currentSelection } = nodeEditor.state;
+      if (
+        !(currentSelection instanceof NodeSelection) ||
+        currentSelection.node.type.name !== this.name
+      ) {
+        return false;
+      }
+      return nodeEditor.commands.deleteSelection();
+    };
+
+    return {
+      Backspace: deleteSelectedPageBreak,
+      Delete: deleteSelectedPageBreak,
+    };
   },
 });
 
@@ -1157,7 +1254,12 @@ let saveTimer;
 const editor = new Editor({
   element: document.getElementById("editor"),
   extensions: [
-    StarterKit.configure({ horizontalRule: false }),
+    VellixDocument,
+    StarterKit.configure({
+      document: false,
+      horizontalRule: false,
+      trailingNode: { node: "paragraph", notAfter: ["paragraph"] },
+    }),
     TaskList,
     VellixTaskItem,
     Placeholder.configure({ placeholder: "" }),
@@ -1916,17 +2018,15 @@ function clearProseMirrorNodeSelectionForSelectionExit() {
 
 function reportContentHeight() {
   const root = document.querySelector(".vellix-editor-page");
-  const measured = blockOuters().filter((outer) => {
-    const style = window.getComputedStyle(outer);
-    return style.display !== "none" && style.visibility !== "hidden" && outer.getClientRects().length > 0;
-  });
+  const content = editor?.view?.dom;
 
   let height = 60;
-  if (root && measured.length > 0) {
+  if (root && content instanceof HTMLElement && isVisibleElement(content)) {
     const top = root.getBoundingClientRect().top;
-    const bottom = Math.max(
-      ...measured.map((el) => el.getBoundingClientRect().bottom),
-    );
+    // Selection enumeration intentionally omits the final empty paragraph.
+    // Layout measurement must include it so a page after a final pageBreak
+    // remains inside the WKWebView and can receive a caret.
+    const bottom = content.getBoundingClientRect().bottom;
     height = Math.max(60, Math.ceil(bottom - top + 2));
   }
 
@@ -2291,11 +2391,63 @@ function blockNodeForKey(key) {
 }
 
 function insertBlockByKey(key, range = null) {
+  if (key === "pageBreak") {
+    return insertPageBreak(range);
+  }
+
   const node = normalizeTipTapNode(blockNodeForKey(key));
   const command = range
     ? editor.chain().focus().deleteRange(range).insertContent(node)
     : editor.chain().focus().insertContent(node);
   const inserted = command.run();
+  renderCalloutIcons();
+  requestAnimationFrame(reportContentHeight);
+  return inserted;
+}
+
+function insertPageBreak(range = null) {
+  const chain = editor.chain().focus();
+  if (range) chain.deleteRange(range);
+
+  const inserted = chain
+    .command(({ tr, state }) => {
+      const breakNode = state.schema.nodes.pageBreak.create({ id: id() });
+      const nextParagraph = state.schema.nodes.paragraph.create({ id: id() });
+      const { $from } = tr.selection;
+
+      let insertionPosition = tr.selection.to;
+      let replaceFrom = null;
+      let replaceTo = null;
+
+      if ($from.depth > 0) {
+        const topLevelStart = $from.before(1);
+        const topLevelNode = tr.doc.nodeAt(topLevelStart);
+        if (topLevelNode) {
+          const topLevelEnd = topLevelStart + topLevelNode.nodeSize;
+          const replaceEmptyBlock =
+            topLevelNode.type.name !== "pageBreak" && !topLevelNode.textContent.trim();
+          if (replaceEmptyBlock) {
+            replaceFrom = topLevelStart;
+            replaceTo = topLevelEnd;
+            insertionPosition = topLevelStart;
+          } else {
+            insertionPosition = topLevelEnd;
+          }
+        }
+      }
+
+      if (replaceFrom !== null && replaceTo !== null) {
+        tr.replaceWith(replaceFrom, replaceTo, [breakNode, nextParagraph]);
+      } else {
+        tr.insert(insertionPosition, [breakNode, nextParagraph]);
+      }
+
+      const paragraphStart = insertionPosition + breakNode.nodeSize;
+      tr.setSelection(TextSelection.near(tr.doc.resolve(paragraphStart + 1), 1));
+      return true;
+    })
+    .run();
+
   renderCalloutIcons();
   requestAnimationFrame(reportContentHeight);
   return inserted;
@@ -2489,7 +2641,7 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
   switch (name) {
     case "setContent":
       {
-        const normalizedDocument = normalizeTipTapDocument(args.document ?? args);
+        const normalizedDocument = normalizeLoadedTipTapDocument(args.document ?? args);
         traceCalloutAttrs("command-setContent-before-setContent", normalizedDocument);
         editor.commands.setContent(normalizedDocument, { emitUpdate: false });
         traceCalloutAttrs("command-setContent-after-setContent", editor.getJSON());
@@ -2551,8 +2703,7 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       insertNode({ type: "divider", attrs: { id: id(), style: normalizedDividerStyle(args.style) } });
       return true;
     case "insertPageBreak":
-      insertNode({ type: "pageBreak", attrs: { id: id() } });
-      return true;
+      return insertBlockByKey("pageBreak");
 	    case "insertCallout":
 	      return chain
 	        .insertVellixCallout({
