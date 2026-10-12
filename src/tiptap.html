@@ -42,6 +42,10 @@
         --vellix-icon-chevdown: url("vellix-icon://asset/chevdown?tint=%23FFFFFF&size=22");
         --vellix-icon-chevup: url("vellix-icon://asset/chevup?tint=%23FFFFFF&size=22");
         --vellix-icon-checkwavy: url("vellix-icon://asset/checkwavy?tint=%23FFFFFF&size=22");
+        --vellix-icon-xmarkwavy: url("vellix-icon://asset/xmarkwavy?tint=%23FFFFFF&size=22");
+        --vellix-icon-numcal: url("vellix-icon://asset/numcal?tint=%23FFFFFF&size=22");
+        --vellix-icon-link: url("vellix-icon://asset/link?tint=%23FFFFFF&size=22");
+        --vellix-property-accent: #b59ad9;
       }
 
       * {
@@ -221,29 +225,322 @@
         background: rgb(128 0 254 / 35%);
       }
 
+      /* WebKit reads the caret color from the root editing host on iOS. */
+      .tiptap-editor.ProseMirror-hideselection {
+        caret-color: transparent !important;
+      }
+
+      .tiptap-editor .ProseMirror-gapcursor {
+        display: none;
+        position: absolute;
+        pointer-events: none;
+      }
+
+      .tiptap-editor.ProseMirror-focused .ProseMirror-gapcursor {
+        display: block;
+      }
+
+      .tiptap-editor .ProseMirror-gapcursor::after {
+        display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        height: 1.52em;
+        border-top: 0 !important;
+        border-left: 2px solid var(--vellix-primary-text);
+        animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+        content: "";
+      }
+
       .tiptap-editor a {
         color: #8fe9ff;
         text-decoration-thickness: 1px;
         text-underline-offset: 3px;
       }
 
+
+      .vellix-page-reference { min-width: 0; margin: 0; padding: 2px 0; }
+      .tiptap-editor > .vellix-page-reference:first-child { padding-top: 0; }
+      .vellix-page-reference-button {
+        display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px;
+        box-sizing: border-box; padding: 4px 0; border: 0; background: transparent;
+        color: var(--vellix-primary-text);
+        font-family: var(--vellix-font-family); text-align: left; cursor: pointer;
+      }
+      .vellix-page-reference-button, .vellix-page-reference-button * {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .vellix-page-thumbnail {
+        flex: 0 0 37px; width: 37px; height: 48px; object-fit: contain;
+        border-radius: 4px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.48), 0 1px 2px rgba(0, 0, 0, 0.30);
+      }
+      .vellix-page-reference-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+      .vellix-page-reference-title { font-size: 18px; font-weight: 600; line-height: 1.3; }
+      .vellix-page-reference-excerpt { font-size: 14px; line-height: 1.3; opacity: 0.48; }
+      .vellix-page-reference-title, .vellix-page-reference-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .vellix-page-card { padding: 6px 0; }
+      .vellix-page-card .vellix-page-reference-button {
+        display: block; position: relative; padding: 0; max-width: 100%; min-height: 0;
+        border-radius: 8px; background-size: cover; background-position: center;
+        box-shadow: 0 8px 14px -5px rgb(0 0 0 / 35%), 0 2px 3px rgb(0 0 0 / 18%);
+        overflow: hidden;
+      }
+      .vellix-page-card-image { display: block; width: 100%; height: 100%; object-fit: fill; }
+      .vellix-page-card-credit { display: block; margin-top: 6px; font-size: 10px; line-height: 1.4; opacity: 0.65; }
+      .vellix-page-card-credit a { color: inherit; text-decoration: underline; }
+      .vellix-page-reference [hidden] { display: none !important; }
+
+      .vellix-property {
+        display: grid;
+        grid-template-columns: minmax(0, 0.43fr) minmax(0, 0.57fr);
+        gap: 14px;
+        align-items: start;
+        min-width: 0;
+        margin: 4px 0;
+        color: var(--vellix-primary-text);
+        font-family: var(--vellix-font-family);
+        font-size: 13px;
+      }
+
+      .vellix-property-name {
+        min-width: 0;
+        min-height: 44px;
+        overflow-wrap: anywhere;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-weight: 700;
+        line-height: 1.5;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .vellix-property-value {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        min-height: 44px;
+      }
+
+      .vellix-property-caption {
+        display: block;
+        min-width: 0;
+        width: 100%;
+        color: var(--vellix-secondary-text);
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .vellix-property-text {
+        padding: 12px 0;
+      }
+
+      .vellix-property-number {
+        width: fit-content;
+        max-width: 100%;
+        padding: 4px 10px;
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--vellix-property-accent) 12%, transparent);
+        color: var(--vellix-property-accent);
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .vellix-property-number[data-empty="true"] {
+        padding: 0;
+        background: transparent;
+        color: var(--vellix-secondary-text);
+      }
+
+      .vellix-property-control {
+        min-width: 0;
+        width: 100%;
+        min-height: 44px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        line-height: 1.4;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        text-align: left;
+        overflow-wrap: anywhere;
+        cursor: pointer;
+      }
+
+      .vellix-property-date {
+        color: var(--vellix-secondary-text);
+        font-size: 13px;
+        flex-wrap: nowrap;
+        gap: 8px;
+      }
+
+      .vellix-property-url {
+        width: fit-content;
+        max-width: 100%;
+        min-height: 0;
+        padding: 6px 12px;
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--vellix-property-accent) 18%, transparent);
+        color: var(--vellix-property-accent);
+        font-size: 13px;
+        font-weight: 600;
+        flex-wrap: nowrap;
+        gap: 8px;
+      }
+
+      .vellix-property-display-text {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .vellix-property-icon {
+        display: inline-block;
+        flex: 0 0 14px;
+        width: 14px;
+        height: 14px;
+        background: currentColor;
+      }
+
+      .vellix-property-calendar {
+        -webkit-mask: var(--vellix-asset-numcal, var(--vellix-icon-numcal)) center / contain no-repeat;
+        mask: var(--vellix-asset-numcal, var(--vellix-icon-numcal)) center / contain no-repeat;
+      }
+
+      .vellix-property-link-arrow {
+        flex-basis: 11px;
+        width: 11px;
+        height: 11px;
+        -webkit-mask: var(--vellix-asset-link, var(--vellix-icon-link)) center / contain no-repeat;
+        mask: var(--vellix-asset-link, var(--vellix-icon-link)) center / contain no-repeat;
+      }
+
+      .vellix-property-control[data-empty="true"] {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--vellix-secondary-text);
+        font-size: 13px;
+      }
+
+      .vellix-property-option {
+        display: inline-flex;
+        min-width: 0;
+        color: var(--property-option-color);
+        font-size: 13px;
+        background: color-mix(in srgb, var(--property-option-color) 16%, transparent);
+        font-weight: 500;
+        border-radius: 999px;
+        padding: 5px 9px;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+
+      .vellix-property-select,
+      .vellix-property-multiSelect {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        gap: 6px;
+      }
+
+      .vellix-property-checkbox {
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        justify-content: flex-start;
+        flex-wrap: nowrap;
+      }
+
+      .vellix-property-checkbox-indicator {
+        display: grid;
+        place-items: center;
+        flex: 0 0 22px;
+        width: 22px;
+        height: 22px;
+        border: 2px solid color-mix(in srgb, var(--vellix-primary-text) 45%, transparent);
+        border-radius: 50%;
+      }
+
+      .vellix-property-checkbox[data-checked="true"] .vellix-property-checkbox-indicator {
+        border-color: var(--vellix-selection-dot);
+        background: var(--vellix-selection-dot);
+      }
+
+      .vellix-property-checkbox-check {
+        display: none;
+        width: 16px;
+        height: 16px;
+        background: #fff;
+        -webkit-mask: var(--vellix-asset-checkwavy, var(--vellix-icon-checkwavy)) center / contain no-repeat;
+        mask: var(--vellix-asset-checkwavy, var(--vellix-icon-checkwavy)) center / contain no-repeat;
+      }
+
+      .vellix-property-checkbox[data-checked="true"] .vellix-property-checkbox-check {
+        display: block;
+      }
+
+      .vellix-property button:disabled { cursor: default; }
+      .vellix-property.ProseMirror-selectednode { outline: none; }
+
+
       .tiptap-editor blockquote {
+        --vellix-blockquote-color: #ffffff;
+        box-sizing: border-box;
         position: relative;
-        margin: 10px 0 10px 2px !important;
-        padding: 4px 0 4px 16px !important;
+        margin: 8px 0 !important;
+        padding: 8px 18px 8px 24px !important;
+        min-height: 58px;
+        min-width: 0;
         color: var(--vellix-primary-text);
         font-style: normal;
-        background: transparent !important;
-        border: 0 !important;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 22px;
       }
 
       .tiptap-editor blockquote::before {
         position: absolute;
-        inset: 3px auto 3px 0;
-        width: 3px;
-        border-radius: 999px;
-        background: color-mix(in srgb, var(--vellix-primary-text) 62%, transparent);
+        inset: -1px;
+        border-radius: inherit;
+        background: var(--vellix-blockquote-color);
+        clip-path: inset(0 calc(100% - 12px) 0 0);
+        pointer-events: none;
         content: "";
+      }
+
+      .vellix-blockquote-color-button {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 1;
+        width: 24px;
+        margin: 0;
+        padding: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        border: 0;
+        border-radius: 22px 0 0 22px;
+        cursor: pointer;
+      }
+
+      .vellix-blockquote-content {
+        min-width: 0;
+        display: flow-root;
       }
 
       .tiptap-editor code {
@@ -257,11 +554,12 @@
 
       .vellix-callout {
         --vellix-callout-color: #ffffff;
+        --vellix-callout-first-line-top: 0px;
         box-sizing: border-box;
         position: relative;
         display: grid;
         grid-template-columns: 42px minmax(0, 1fr);
-        align-items: center;
+        align-items: start;
         gap: 11px;
         width: 100%;
         max-width: none;
@@ -269,11 +567,16 @@
         padding: 8px 10px;
         min-height: 58px;
         background: rgba(255, 255, 255, 0.08);
+        background: color-mix(in srgb, var(--vellix-callout-color) 8%, transparent);
         border: 1px solid rgba(255, 255, 255, 0.14);
+        border-color: color-mix(in srgb, var(--vellix-callout-color) 18%, transparent);
         border-radius: 22px;
       }
 
       .vellix-callout-icon-button {
+        position: relative;
+        font: inherit;
+        line-height: inherit;
         appearance: none;
         -webkit-appearance: none;
         display: flex;
@@ -281,10 +584,11 @@
         justify-content: center;
         width: 42px;
         height: 42px;
-        margin: 0;
+        margin: max(0px, var(--vellix-callout-first-line-top)) 0 0;
         padding: 8px;
         box-sizing: border-box;
-        background: rgba(255, 255, 255, 0.10);
+        background: inherit;
+        background: color-mix(in srgb, var(--vellix-callout-color) 8%, transparent);
         border: 0;
         border-radius: 17px;
         color: #ffffff;
@@ -293,19 +597,31 @@
         -webkit-user-select: none;
       }
 
-      .vellix-callout-icon-button:hover {
-        background: rgba(255, 255, 255, 0.16);
+      @media (hover: hover) and (pointer: fine) {
+        .vellix-callout-icon-button:hover {
+          background: color-mix(in srgb, var(--vellix-callout-color) 12%, transparent);
+        }
       }
 
       .vellix-callout-icon-image {
+        position: absolute;
+        inset: 8px;
         display: block;
-        width: 100%;
-        height: 100%;
+        width: auto;
+        height: auto;
         margin: 0;
         border-radius: 0;
-        background-position: center;
-        background-repeat: no-repeat;
-        background-size: contain;
+        background-image: none !important;
+        background-color: color-mix(in srgb, var(--vellix-callout-color) 25%, transparent);
+        -webkit-mask-image: var(--vellix-callout-icon-mask, linear-gradient(transparent, transparent));
+        mask-image: var(--vellix-callout-icon-mask, linear-gradient(transparent, transparent));
+        -webkit-mask-position: center;
+        mask-position: center;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        mask-mode: alpha;
         pointer-events: none;
       }
 
@@ -420,6 +736,15 @@
         border-color: var(--vellix-selection-dot) !important;
       }
 
+      .tiptap-editor [data-type="taskItem"][data-crossed="true"] > label > span {
+        background-color: var(--vellix-selection-dot) !important;
+        background-image: var(
+          --vellix-asset-xmarkwavy,
+          var(--vellix-icon-xmarkwavy)
+        ) !important;
+        border-color: var(--vellix-selection-dot) !important;
+      }
+
       .tiptap-editor [data-type="taskItem"] > div {
         min-width: 0;
         width: 100%;
@@ -470,19 +795,13 @@
       }
 
       .tiptap-editor .vellix-divider-dots {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: min(88%, 560px);
-      }
-
-      .tiptap-editor .vellix-divider-dot {
         display: block;
-        width: 5px;
-        height: 5px;
-        flex: 0 0 5px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.28);
+        width: 100%;
+        height: 1px;
+        color: rgba(255, 255, 255, 0.55);
+        background-image: radial-gradient(circle at 0.5px 0.5px, currentColor 0.5px, transparent 0.5px);
+        background-size: 5px 1px;
+        background-repeat: repeat-x;
       }
 
       .tiptap-editor .vellix-divider-four-circles {
@@ -505,7 +824,7 @@
          SwiftUI uses its reported bounds to split the native page sheets,
          matching the journal editor's page-segmentation model. */
       :root {
-        --vellix-page-gap: 44px;
+        --vellix-page-gap: 14px;
       }
 
       .tiptap-editor.ProseMirror > [data-vellix-page-break],
@@ -686,7 +1005,11 @@
         height: 8px;
       }
 
-      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-dot,
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-dots {
+        color: rgba(46, 203, 255, 0.58);
+        filter: drop-shadow(0 0 4px rgba(46, 203, 255, 0.18));
+      }
+
       .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-circle {
         background: rgba(46, 203, 255, 0.58);
         box-shadow: 0 0 8px rgba(46, 203, 255, 0.18);
@@ -707,6 +1030,114 @@
         <div id="editor"></div>
       </div>
     </main>
+    <script>
+      (() => {
+        const root = document.getElementById("editor");
+        const style = document.createElement("style");
+        document.head.append(style);
+        const sheet = style.sheet;
+        const rules = new Map();
+        let frame = 0;
+
+        function firstLineTop(text) {
+          const first = [...text.querySelectorAll("p,h1,h2,h3,h4,h5,h6,pre")]
+            .find((element) => element.getClientRects().length &&
+              !element.closest('[contenteditable="false"]'));
+          if (!first) return null;
+          const walker = document.createTreeWalker(first, NodeFilter.SHOW_TEXT);
+          const range = document.createRange();
+          let top = null;
+          let bottom = null;
+          let node;
+          while ((node = walker.nextNode())) {
+            if (!node.textContent || node.parentElement.closest('[contenteditable="false"]')) continue;
+            range.selectNodeContents(node);
+            for (const rect of range.getClientRects()) {
+              if (!rect.height || !rect.width) continue;
+              if (top === null) {
+                top = rect.top;
+                bottom = rect.bottom;
+              } else if (rect.top < bottom && rect.bottom > top) {
+                top = Math.min(top, rect.top);
+                bottom = Math.max(bottom, rect.bottom);
+              }
+            }
+          }
+          const textTop = text.getBoundingClientRect().top;
+          if (top !== null) return top - textTop;
+          const firstStyle = getComputedStyle(first);
+          return first.getBoundingClientRect().top - textTop +
+            parseFloat(firstStyle.borderTopWidth) + parseFloat(firstStyle.paddingTop);
+        }
+
+        function update() {
+          frame = 0;
+          const active = new Set();
+          const measurements = [];
+          for (const callout of root.querySelectorAll(".vellix-callout")) {
+            const id = callout.dataset.vellixBlockId;
+            const text = callout.querySelector(":scope > .vellix-callout-text");
+            if (!id || !text) continue;
+            active.add(id);
+            let entry = rules.get(id);
+            if (!entry) {
+              const index = sheet.insertRule(
+                `.vellix-callout[data-vellix-block-id="${CSS.escape(id)}"] {}`,
+                sheet.cssRules.length,
+              );
+              entry = { rule: sheet.cssRules[index], text, top: null };
+              rules.set(id, entry);
+              resize.observe(text);
+            } else if (entry.text !== text) {
+              resize.unobserve(entry.text);
+              entry.text = text;
+              resize.observe(text);
+            }
+            const icon = (callout.dataset.calloutIcon || "sparkle").trim() || "sparkle";
+            if (entry.icon !== icon) {
+              entry.icon = icon;
+              entry.rule.style.setProperty(
+                "--vellix-callout-icon-mask",
+                `var(--vellix-asset-${CSS.escape(icon)}, var(--vellix-asset-sparkle))`,
+              );
+            }
+            const top = firstLineTop(text);
+            if (top !== null && Number.isFinite(top) &&
+                (entry.top === null || Math.abs(top - entry.top) > 0.03)) {
+              measurements.push([entry, top]);
+            }
+          }
+          // Keep presentation outside ProseMirror's DOM so measuring never changes the document.
+          for (const [entry, top] of measurements) {
+            entry.top = top;
+            entry.rule.style.setProperty("--vellix-callout-first-line-top", `${top}px`);
+          }
+          for (const [id, entry] of rules) {
+            if (active.has(id)) continue;
+            resize.unobserve(entry.text);
+            const index = [...sheet.cssRules].indexOf(entry.rule);
+            if (index >= 0) sheet.deleteRule(index);
+            rules.delete(id);
+          }
+        }
+
+        function schedule() {
+          if (!frame) frame = requestAnimationFrame(update);
+        }
+        const resize = new ResizeObserver(schedule);
+        resize.observe(root);
+        new MutationObserver(schedule).observe(root, {
+          subtree: true, childList: true, characterData: true, attributes: true,
+        });
+        new MutationObserver(schedule).observe(document.documentElement, {
+          attributes: true, attributeFilter: ["style"],
+        });
+        window.addEventListener("resize", schedule);
+        document.fonts.addEventListener("loadingdone", schedule);
+        document.fonts.ready.then(schedule);
+        schedule();
+      })();
+    </script>
     <script src="./tiptap.bundle.js"></script>
   </body>
 </html>
