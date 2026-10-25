@@ -1,4 +1,7 @@
 import { Node, getRenderedAttributes, mergeAttributes } from "@tiptap/core";
+import { GapCursor } from "@tiptap/pm/gapcursor";
+import { closeHistory } from "@tiptap/pm/history";
+import { Selection } from "@tiptap/pm/state";
 import { normalizeProperty, propertyText, propertyURL } from "./inline-properties.js";
 
 export function inlinePropertyNode({ post, selectionActive, reportHeight }) {
@@ -22,6 +25,34 @@ export function inlinePropertyNode({ post, selectionActive, reportHeight }) {
     parseHTML() { return [{ tag: "div[data-vellix-property]" }]; },
     renderHTML({ node, HTMLAttributes }) {
       return ["div", mergeAttributes(HTMLAttributes, { class: "vellix-property" }), propertyText(node.attrs.property)];
+    },
+    addKeyboardShortcuts() {
+      const stopAtProperty = ({ editor }) => {
+        if (!editor.isEditable || selectionActive()) return false;
+        const { empty, $from } = editor.state.selection;
+        if (!empty || !$from.parent.isTextblock || $from.parentOffset !== 0) return false;
+        for (let depth = $from.depth; depth > 0; depth -= 1) {
+          const previous = editor.state.doc.resolve($from.before(depth)).nodeBefore;
+          if (previous) {
+            if (previous.type.name !== this.name) return false;
+            // Do not let the default keymap select or delete a non-text property.
+            if ($from.parent.type.name === "paragraph" && $from.parent.content.size === 0) {
+              const from = $from.before();
+              const transaction = editor.state.tr.delete(from, $from.after());
+              const $position = transaction.doc.resolve(Math.min(from, transaction.doc.content.size));
+              const selection = GapCursor.valid($position) ? new GapCursor($position)
+                : Selection.findFrom($position, 1, true) || Selection.findFrom($position, -1, true)
+                  || new GapCursor($position);
+              editor.view.dispatch(closeHistory(transaction.setSelection(selection)));
+            }
+            editor.commands.blur();
+            return true;
+          }
+          if ($from.node(depth - 1).type.spec.isolating) return false;
+        }
+        return false;
+      };
+      return { Backspace: stopAtProperty, "Mod-Backspace": stopAtProperty, "Shift-Backspace": stopAtProperty };
     },
     addNodeView() {
       return ({ node, editor, getPos }) => {

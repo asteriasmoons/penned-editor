@@ -96,7 +96,7 @@ export function pageReferenceNode({ post, selectionActive }) {
           thumbnail.hidden = isCard || !record?.thumbnail;
           text.hidden = isCard;
           cardImage.hidden = !isCard;
-          button.style.width = isCard ? `${Number(record.cardWidth) || 154}px` : "";
+          button.style.width = isCard ? (record.cardFullWidth ? "100%" : `${Number(record.cardWidth) || 154}px`) : "";
           button.style.aspectRatio = isCard ? `${Number(record.cardWidth) || 154} / ${Number(record.cardHeight) || 90}` : "";
           const backgroundURL = safeURL(record?.cardBackgroundURL, "images.unsplash.com");
           button.style.backgroundImage = isCard && backgroundURL ? `url(${JSON.stringify(backgroundURL)})` : "";
