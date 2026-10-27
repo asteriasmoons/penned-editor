@@ -1,6 +1,7 @@
 import { Mark, Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
+import "./text-gradient-paint.js";
 
 // The editor owns the held range. Native UI receives only an opaque token.
 export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelection, closeHistory,
