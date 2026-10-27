@@ -1,12 +1,13 @@
 import { Mark, Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
-import "./text-gradient-paint.js";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 // The editor owns the held range. Native UI receives only an opaque token.
-export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelection, closeHistory,
+export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelection, closeHistory, Decoration, DecorationSet,
   post, snapshot, selectionActive }) {
   const key = new PluginKey("vellixInlineTextColor");
+  const gradientKey = new PluginKey("vellixInlineGradientLayout");
   let sequence = 0;
   function color(value) {
     if (typeof value !== "string") return null;
@@ -74,6 +75,126 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
     const mixed = new Set(values.map(v => JSON.stringify(v))).size > 1;
     return { style: mixed ? null : values[0] ?? null, mixed };
   }
+
+  function gradientView(view) {
+    const doc = view.dom.ownerDocument, win = doc.defaultView;
+    let frame = 0, destroyed = false;
+    const stylesheet = doc.createElement("style");
+    // Only the fallback mark background is suppressed. Block fills, layout and
+    // text remain untouched; ProseMirror owns every generated inline span.
+    stylesheet.textContent = ".vellix-gradient-fragment span[data-vellix-gradient]," +
+      "span[data-vellix-gradient]:has(.vellix-gradient-fragment){background-image:none!important}";
+    doc.head.appendChild(stylesheet);
+
+    function fragments(node) {
+      const range = doc.createRange(), text = node.data, result = [];
+      const from = view.posAtDOM(node, 0);
+      const position = view.state.doc.resolve(from);
+      if (!position.parent.isTextblock || from + text.length > position.end() ||
+          view.state.doc.textBetween(from, from + text.length, "\n") !== text) return result;
+      function rects(start, end) {
+        range.setStart(node, start); range.setEnd(node, end);
+        return [...range.getClientRects()].filter(rect => rect.width > 0.01 && rect.height > 0.01);
+      }
+      let start = 0;
+      while (start < text.length) {
+        let end = text.length, boxes = rects(start, end);
+        if (!boxes.length) break;
+        if (boxes.length > 1) {
+          // Find a single visual fragment without inserting wrappers while measuring.
+          let low = start + 1, high = end;
+          while (low < high) {
+            const middle = Math.ceil((low + high) / 2);
+            if (rects(start, middle).length <= 1) low = middle;
+            else high = middle - 1;
+          }
+          end = low; boxes = rects(start, end);
+        }
+        if (boxes.length === 1) result.push({ from: from + start, to: from + end, rect: boxes[0] });
+        start = end;
+      }
+      return result;
+    }
+
+    function paint() {
+      frame = 0;
+      if (destroyed || view.isDestroyed) return;
+      const blocks = new Set();
+      for (const span of view.dom.querySelectorAll("span[data-vellix-gradient]")) {
+        const block = span.closest("p,h1,h2,h3,h4,h5,h6,pre,figcaption");
+        if (block && view.dom.contains(block)) blocks.add(block);
+      }
+      const decorations = [], signature = [];
+      for (const block of blocks) {
+        const walker = doc.createTreeWalker(block, win.NodeFilter.SHOW_TEXT), groups = [];
+        let node, current = null;
+        while ((node = walker.nextNode())) {
+          if (!node.data) continue;
+          const boundary = node.parentElement.closest("[contenteditable]");
+          const span = node.parentElement.closest("span[data-vellix-gradient]");
+          const value = span && (!boundary || boundary === view.dom || boundary.contentEditable !== "false")
+            ? parseGradient(span) : null;
+          if (!value) { current = null; continue; }
+          const identity = JSON.stringify(value);
+          if (current?.identity !== identity) {
+            current = { identity, value, parts: [] }; groups.push(current);
+          }
+          current.parts.push(...fragments(node));
+        }
+        for (const group of groups) {
+          if (!group.parts.length) continue;
+          let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+          for (const { rect } of group.parts) {
+            left = Math.min(left, rect.left); right = Math.max(right, rect.right);
+            top = Math.min(top, rect.top); bottom = Math.max(bottom, rect.bottom);
+          }
+          const radians = group.value.angle * Math.PI / 180;
+          const dx = Math.sin(radians), dy = -Math.cos(radians);
+          const length = Math.abs(dx) * (right - left) + Math.abs(dy) * (bottom - top);
+          for (const { from, to, rect } of group.parts) {
+            const fragmentLength = Math.abs(dx) * rect.width + Math.abs(dy) * rect.height;
+            if (fragmentLength <= 0) continue;
+            // Project the same CSS-angle gradient onto every line and formatted run.
+            const offset = dx * ((left + right - rect.left - rect.right) / 2) +
+              dy * ((top + bottom - rect.top - rect.bottom) / 2);
+            const start = (offset - (length - fragmentLength) / 2) / fragmentLength;
+            const end = start + length / fragmentLength;
+            const image = `linear-gradient(${group.value.angle}deg,${group.value.start} ${(start * 100).toFixed(4)}%,${group.value.end} ${(end * 100).toFixed(4)}%)`;
+            const css = `background-image:${image}!important;background-size:${rect.width.toFixed(3)}px ${rect.height.toFixed(3)}px!important;` +
+              "background-position:0 0!important;background-repeat:no-repeat!important;background-origin:border-box!important;" +
+              "background-clip:text!important;-webkit-background-clip:text!important;color:transparent!important;" +
+              "-webkit-text-fill-color:transparent!important;box-decoration-break:clone;-webkit-box-decoration-break:clone";
+            decorations.push(Decoration.inline(from, to, { class: "vellix-gradient-fragment", style: css }));
+            signature.push([from, to, css]);
+          }
+        }
+      }
+      const next = JSON.stringify(signature);
+      if (gradientKey.getState(view.state).signature === next) return;
+      view.dispatch(view.state.tr.setMeta(gradientKey, {
+        decorations: DecorationSet.create(view.state.doc, decorations), signature: next,
+      }).setMeta("addToHistory", false));
+    }
+    function schedule() {
+      if (!destroyed && !frame) frame = win.requestAnimationFrame(paint);
+    }
+    const resize = new win.ResizeObserver(schedule);
+    resize.observe(view.dom);
+    // Native font/appearance updates live here, outside the editable document.
+    const appearance = new win.MutationObserver(schedule);
+    appearance.observe(doc.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+    doc.fonts?.addEventListener("loadingdone", schedule);
+    void doc.fonts?.ready.then(schedule);
+    schedule();
+    return {
+      update(_view, previous) { if (view.state.doc !== previous.doc) schedule(); },
+      destroy() {
+        destroyed = true; win.cancelAnimationFrame(frame);
+        resize.disconnect(); appearance.disconnect(); stylesheet.remove();
+        doc.fonts?.removeEventListener("loadingdone", schedule);
+      },
+    };
+  }
   const integration = Extension.create({
     name: "vellixTextColorSelection",
     addProseMirrorPlugins() {
@@ -90,7 +211,21 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
           if (to <= from || tr.doc.textBetween(from, to, "\n") !== held.text) return null;
           return { ...held, from, to };
         },
-      } })];
+      } }), new Plugin({
+        key: gradientKey,
+        state: {
+          init: () => ({ decorations: DecorationSet.empty, signature: "" }),
+          apply(tr, previous) {
+            const next = tr.getMeta(gradientKey);
+            if (next) return next;
+            // Drop old spans on content edits so new text keeps the normal mark
+            // fallback until geometry is refreshed. Never write paint into JSON.
+            return tr.docChanged ? { decorations: DecorationSet.empty, signature: "" } : previous;
+          },
+        },
+        props: { decorations: state => gradientKey.getState(state)?.decorations ?? DecorationSet.empty },
+        view: gradientView,
+      })];
     },
   });
   function command(editor, name, args = {}) {
@@ -143,4 +278,4 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
   return { mark, integration, command, formattingState };
 }
 
-export const textColorDependencies = { Mark, Extension, Plugin, PluginKey, TextSelection, closeHistory };
+export const textColorDependencies = { Mark, Extension, Plugin, PluginKey, TextSelection, closeHistory, Decoration, DecorationSet };
