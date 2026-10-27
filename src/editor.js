@@ -2441,7 +2441,9 @@ function transformNodeToBlock(node, type, payload = {}) {
         content: [{ type: "listItem", attrs: { id: id() }, content: [paragraph(content)] }],
       };
     case "toggleListItem":
-      return { type: "toggleItem", attrs: { id: blockID, open: true }, content: [paragraph(content)] };
+      return { type: "toggleItem", attrs: { id: blockID, open: true }, content: [
+        payload.level ? { type: "heading", attrs: { id: id(), level: Math.max(1, Math.min(6, Number(payload.level) || 1)) }, content } : paragraph(content),
+      ] };
     case "codeBlock":
       return { type: "codeBlock", attrs: { id: blockID }, content: inlineContent(plainText(node)) };
     default:
