@@ -32,6 +32,7 @@ import { nativeCollectionRegions } from "./native-collection-regions.js";
 import { prepareDocumentPresentation } from "./presentation-ready.js";
 import { applyEditorAppearance } from "./appearance.js";
 import { createBlockActions } from "./block-actions.js";
+import { Caption } from "./caption.js";
 import "./structured-placeholders.js";
 import "./vendor/table-library.js";
 import "./table-formulas.js";
@@ -78,6 +79,7 @@ const SLASH_ITEMS = [
   { key: "heading4", title: "H4", detail: "Small heading", icon: "h4" },
   { key: "heading5", title: "H5", detail: "Tiny heading", icon: "h5" },
   { key: "paragraph", title: "Paragraph", detail: "Plain text", icon: "linedpages" },
+  { key: "caption", title: "Caption", detail: "Smaller supporting text", icon: "linedpages" },
   { key: "nestedPage", title: "Page", detail: "A page inside this document", icon: "linedpages" },
   { key: "pageCard", title: "Card", detail: "A page with a custom card preview", icon: "linedpages" },
   { key: "toggleListItem", title: "Toggle", detail: "Collapsible block", icon: "chevright" },
@@ -754,6 +756,7 @@ const BlockID = Extension.create({
       {
         types: [
           "paragraph",
+          "caption",
           "heading",
           "codeBlock",
           "blockquote",
@@ -1440,6 +1443,7 @@ const editor = new Editor({
         "prosemirror-transform": { Transform }, "prosemirror-keymap": { keydownHandler } } }),
     window.VellixStructuredPlaceholders.createExtension({ Extension, Plugin, PluginKey, Decoration, DecorationSet, TextSelection, DOMSerializer }),
     VellixDocument,
+    Caption,
     templateComponents.node,
     attachments.node,
     attachments.integration,
@@ -2385,6 +2389,8 @@ function transformNodeToBlock(node, type, payload = {}) {
   const blockID = nodeId(node);
   const content = taggedInlineContent(node) ?? inlineContent(plainText(node));
   switch (type) {
+    case "caption":
+      return { type: "caption", attrs: { id: blockID }, content };
     case "heading":
       return {
         type: "heading",
@@ -2935,6 +2941,8 @@ function blockNodeForKey(key) {
     return { type: "inlineProperty", attrs: { id: id(), property: normalizeProperty({ kind: key.slice(9) }) } };
   }
   switch (key) {
+    case "caption":
+      return { type: "caption", attrs: { id: id() } };
     case "heading1":
       return { type: "heading", attrs: { id: id(), level: 1 } };
     case "heading2":
