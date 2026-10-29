@@ -12,7 +12,7 @@ export const Caption = Node.create({
     return ["p", mergeAttributes(HTMLAttributes, {
       "data-vellix-caption": "",
       class: "vellix-caption",
-      style: "font-size:0.85em;font-weight:400;line-height:1.5;color:color-mix(in srgb,var(--vellix-primary-text) 75%,transparent)",
+      style: "font-size:12px;font-weight:400;line-height:1.5;color:color-mix(in srgb,var(--vellix-primary-text) 75%,transparent)",
     }), 0];
   },
   addKeyboardShortcuts() {
