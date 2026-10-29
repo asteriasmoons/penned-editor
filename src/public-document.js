@@ -12,6 +12,7 @@ import "./table-formulas.js";
 export const documentFonts = {
   rounded: 'ui-rounded,"SF Pro Rounded","Nunito Variable",Nunito,system-ui,sans-serif',
   system: "system-ui,sans-serif", serif: "ui-serif,Georgia,serif", mono: "ui-monospace,monospace",
+  hachiMaruPop: '"HachiMaruPop",cursive',
 };
 export const validColor = value => typeof value === "string" && /^#(?:[\da-f]{3}|[\da-f]{6}|[\da-f]{8})$/i.test(value) ? value : null;
 const defaults = values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { default: value, rendered: false }]));
@@ -239,7 +240,7 @@ export function publicExtensions(options) {
       renderHTML: ({ node }) => {
         const a = node.attrs;
         return [name === "tableHeader" ? "th" : "td", { colspan: a.colspan, rowspan: a.rowspan, style: style({
-          "background-color": validColor(a.fillColor), color: validColor(a.textColor), "font-family": a.code ? documentFonts.mono : documentFonts[a.font],
+          "background-color": validColor(a.fillColor), color: validColor(a.textColor), "font-family": a.code && a.font !== "hachiMaruPop" ? "var(--vellix-code-font-family,ui-monospace),monospace" : documentFonts[a.font],
           "font-weight": a.bold == null ? null : a.bold ? 700 : 400, "font-style": a.italic ? "italic" : null,
           "text-decoration": a.strike ? "line-through" : null, "text-align": ["left", "center", "right", "justify"].includes(a.align) ? a.align : "left" }) }, 0];
       } })),

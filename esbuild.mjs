@@ -25,6 +25,7 @@ async function prepareDist() {
   await rm(dist, { recursive: true, force: true });
   await mkdir(dist, { recursive: true });
   await copyFile(resolve(root, "src", "tiptap.html"), resolve(dist, "tiptap.html"));
+  await cp(resolve(root, "src", "fonts"), resolve(dist, "fonts"), { recursive: true });
   await cp(resolve(root, "src", "vendor"), resolve(dist, "vendor"), { recursive: true });
   for (const name of ["table-formulas.js", "vellix-tables.js", "vellix-tables.css", "text-gradient-paint.js"]) {
     await copyFile(resolve(root, "src", name), resolve(dist, name));

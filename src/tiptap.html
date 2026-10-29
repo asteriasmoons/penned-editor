@@ -8,6 +8,44 @@
     />
     <title>Vellix TipTap</title>
     <style>
+      @font-face {
+        font-family: "HachiMaruPop";
+        src: url("penned-font://document/HachiMaruPop-Regular.ttf") format("truetype"), url("./fonts/HachiMaruPop-Regular.ttf") format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "HachiMaruPop";
+        src: url("penned-font://document/HachiMaruPop-SyntheticBold.ttf") format("truetype"), url("./fonts/HachiMaruPop-SyntheticBold.ttf") format("truetype");
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "HachiMaruPop";
+        src: url("penned-font://document/HachiMaruPop-SyntheticItalic.ttf") format("truetype"), url("./fonts/HachiMaruPop-SyntheticItalic.ttf") format("truetype");
+        font-weight: 400;
+        font-style: italic;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "HachiMaruPop";
+        src: url("penned-font://document/HachiMaruPop-SyntheticBoldItalic.ttf") format("truetype"), url("./fonts/HachiMaruPop-SyntheticBoldItalic.ttf") format("truetype");
+        font-weight: 700;
+        font-style: italic;
+        font-display: swap;
+      }
+      html[style*="HachiMaruPop"] {
+        --vellix-code-font-family: "HachiMaruPop", cursive;
+      }
+      html[style*="HachiMaruPop"] .tiptap-editor,
+      html[style*="HachiMaruPop"] .tiptap-editor * {
+        font-synthesis: none;
+      }
+      html[style*="HachiMaruPop"] .tiptap-editor :is(code, pre) {
+        font-family: var(--vellix-font-family) !important;
+      }
       :root {
         color: #f7f7f7;
         background: transparent;
