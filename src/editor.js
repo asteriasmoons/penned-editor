@@ -77,7 +77,6 @@ const SLASH_ITEMS = [
   { key: "heading2", title: "Subtitle", detail: "H2, 21px", icon: "h2" },
   { key: "heading3", title: "Heading", detail: "H3, 18px", icon: "h3" },
   { key: "heading4", title: "Subheading", detail: "H4, 16px", icon: "h4" },
-  { key: "heading5", title: "Subheading (H5)", detail: "H5, 16px", icon: "h5" },
   { key: "paragraph", title: "Paragraph", detail: "Plain text", icon: "linedpages" },
   { key: "caption", title: "Caption", detail: "Smaller supporting text", icon: "linedpages" },
   { key: "nestedPage", title: "Page", detail: "A page inside this document", icon: "linedpages" },
