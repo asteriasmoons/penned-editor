@@ -18,7 +18,8 @@ import Code from "@tiptap/extension-code";
 import Placeholder from "@tiptap/extension-placeholder";
 import { createTemplateComponents } from "./template-components.js";
 import { createDocumentTags, taggedInlineContent } from "./document-tags.js";
-import { createAttachments, containsAttachments } from "./attachments.js";
+import { createAttachments, containsAttachments, attachmentURL } from "./attachments.js";
+import { clipSource, clipPreview } from "./clip-source.js";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import { PROPERTY_KINDS, normalizeProperty, propertyText } from "./inline-properties.js";
@@ -111,6 +112,7 @@ function postToSwift(kind, payload = {}) {
 }
 
 function traceDiag(label, details = {}) {
+  if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
   const message = JSON.stringify({ label, ...details });
   console.log(`[Vellix TipTap TRACE] ${message}`);
   postToSwift("diag", { message });
@@ -285,6 +287,7 @@ function canvasPixelStats(img) {
 }
 
 function traceCalloutImageState(label, callout, img, extra = {}) {
+  if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
   const button = img?.closest?.(".vellix-callout-icon-button") ?? null;
   const isImageElement = img instanceof HTMLImageElement;
   traceDiag(label, {
@@ -314,6 +317,7 @@ function traceCalloutImageState(label, callout, img, extra = {}) {
 }
 
 function scheduleCalloutImageStateProbes(callout, img, sourceLabel) {
+  if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
   traceCalloutImageState("callout-dom-icon-probe", callout, img, { phase: `${sourceLabel}:immediate` });
   requestAnimationFrame(() => {
     traceCalloutImageState("callout-dom-icon-probe", callout, img, { phase: `${sourceLabel}:raf1` });
@@ -394,6 +398,7 @@ function calloutTraceRecords(source) {
 }
 
 function traceCalloutAttrs(label, source, extra = {}) {
+  if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
   traceDiag(label, {
     callouts: calloutTraceRecords(source),
     ...extra,
@@ -1028,6 +1033,14 @@ const PlainCallout = Node.create({
   addAttributes() {
     return {
       id: { default: null },
+      clipSource: {
+        default: null,
+        parseHTML: element => {
+          try { return clipSource(JSON.parse(element.getAttribute("data-penned-clip-source"))); }
+          catch { return null; }
+        },
+        renderHTML: attrs => clipSource(attrs.clipSource) ? { "data-penned-clip-source": JSON.stringify(clipSource(attrs.clipSource)) } : {},
+      },
       color: {
         default: DEFAULT_CALLOUT_COLOR,
         parseHTML: (element) => element.getAttribute("data-callout-color") || DEFAULT_CALLOUT_COLOR,
@@ -1036,10 +1049,18 @@ const PlainCallout = Node.create({
     };
   },
   parseHTML() {
-    return [{ tag: "div[data-type='vellix-plain-callout']" }, { tag: "div.vellix-plain-callout" }];
+    return [{ tag: "div[data-penned-clip-source]", contentElement: ".penned-clip-source-content" },
+      { tag: "div[data-type='vellix-plain-callout']" }, { tag: "div.vellix-plain-callout" }];
   },
   renderHTML({ HTMLAttributes, node }) {
     const color = node.attrs.color || DEFAULT_CALLOUT_COLOR;
+    const source = clipSource(node.attrs.clipSource);
+    if (source) {
+      return ["div", mergeAttributes(HTMLAttributes, { "data-type": "vellix-plain-callout",
+        class: "vellix-plain-callout penned-clip-source", "data-callout-color": color }),
+        clipPreview(source, attachmentURL(source.file, /heic|heif/.test(source.file?.mimeType || "") ? "image" : "")),
+        ["div", { class: "vellix-plain-callout-text penned-clip-source-content" }, 0]];
+    }
     return ["div", mergeAttributes(HTMLAttributes, {
       "data-type": "vellix-plain-callout", class: "vellix-plain-callout",
       "data-callout-color": color, style: `--vellix-callout-color:${color};`,
@@ -1482,16 +1503,17 @@ const editor = new Editor({
   editorProps: {
     attributes: {
       class: "tiptap-editor",
-      spellcheck: "true",
+      spellcheck: "false",
     },
   },
   onUpdate: ({ editor }) => {
     renderCalloutIcons();
-    traceCalloutAttrs("onUpdate-after-transaction", editor.getJSON());
+    if (window.PENNED_EDITOR_DIAGNOSTICS === true) traceCalloutAttrs("onUpdate-after-transaction", editor.getJSON());
     scheduleUpdate(editor);
     reportContentHeight();
   },
   onTransaction: ({ editor, transaction }) => {
+    if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
     traceCalloutAttrs("onTransaction", editor.getJSON(), {
       docChanged: transaction.docChanged,
       selectionSet: transaction.selectionSet,
@@ -1535,6 +1557,7 @@ function mutationElementSummary(node) {
 
 const editorElement = document.getElementById("editor");
 const calloutMutationObserver = new MutationObserver((mutations) => {
+  if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
   mutations.forEach((mutation) => {
     const target = mutation.target;
     const added = Array.from(mutation.addedNodes || []).filter(isCalloutProbeElement);
@@ -1571,7 +1594,7 @@ const calloutMutationObserver = new MutationObserver((mutations) => {
   });
 });
 
-if (editorElement) {
+if (editorElement && window.PENNED_EDITOR_DIAGNOSTICS === true) {
   calloutMutationObserver.observe(editorElement, {
     subtree: true,
     childList: true,
@@ -3461,6 +3484,14 @@ if (!window.PennedBlockSelection) document.addEventListener(
 
 document.addEventListener("click", (event) => {
   if (selectionMode !== "off" && handleSelectionHandleEvent(event)) return;
+
+  const sourceLink = event.target.closest?.("[data-penned-clip-link]");
+  if (sourceLink && editor.view.dom.contains(sourceLink)) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (selectionMode === "off") postToSwift("propertyURLRequest", { url: sourceLink.href });
+    return;
+  }
 
   const colorButton = event.target.closest?.(".vellix-plain-callout-color-button");
   if (colorButton) {

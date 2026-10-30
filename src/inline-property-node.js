@@ -3,6 +3,7 @@ import { GapCursor } from "@tiptap/pm/gapcursor";
 import { closeHistory } from "@tiptap/pm/history";
 import { Selection } from "@tiptap/pm/state";
 import { normalizeProperty, propertyText, propertyURL } from "./inline-properties.js";
+import { clipSource, clipSavedDate } from "./clip-source.js";
 
 export function inlinePropertyNode({ post, selectionActive, reportHeight }) {
   return Node.create({
@@ -108,6 +109,11 @@ export function inlinePropertyNode({ post, selectionActive, reportHeight }) {
 
         const render = () => {
           const property = normalizeProperty(current.attrs.property);
+          const position = getPos();
+          const parent = typeof position === "number" ? editor.state.doc.resolve(position).parent : null;
+          const sourceDate = property.kind === "date" && parent?.type.name === "plainCallout" && !!clipSource(parent.attrs.clipSource);
+          dom.classList.toggle("penned-clip-saved", sourceDate);
+          value.querySelector(".penned-clip-saved-time")?.remove();
           const emptyCaption = property.placeholder || "Tap title to configure";
           const attributes = getRenderedAttributes(current, editor.extensionManager.attributes);
           for (const [key, attr] of Object.entries(attributes)) dom.setAttribute(key, attr);
@@ -180,8 +186,15 @@ export function inlinePropertyNode({ post, selectionActive, reportHeight }) {
                 icon.setAttribute("aria-hidden", "true");
                 const text = document.createElement("span");
                 text.className = "vellix-property-display-text";
-                text.textContent = date.toLocaleString(undefined, { dateStyle: "medium", ...(property.includeTime ? { timeStyle: "short" } : {}) });
+                const saved = sourceDate ? clipSavedDate(property.value) : null;
+                text.textContent = saved ? saved.day : date.toLocaleString(undefined, { dateStyle: "medium", ...(property.includeTime ? { timeStyle: "short" } : {}) });
                 button.append(icon, text);
+                if (saved && property.includeTime) {
+                  const time = document.createElement("span");
+                  time.className = "penned-clip-saved-time";
+                  time.textContent = "at " + saved.time;
+                  value.append(time);
+                }
               } else button.textContent = emptyCaption;
               button.dataset.empty = String(!validDate);
             } else {

@@ -6,6 +6,7 @@ import FormulaParser from "fast-formula-parser";
 import { createTextColor, textColorDependencies } from "./text-color.js";
 import { Caption } from "./caption.js";
 import { normalizeProperty, propertyURL, PROPERTY_KINDS } from "./inline-properties.js";
+import { clipSource, clipPreview, clipSavedDate } from "./clip-source.js";
 import { componentDefinition, componentResponse } from "./template-components.js";
 import "./table-formulas.js";
 
@@ -192,8 +193,13 @@ export function publicExtensions(options) {
         ...(file.previewMediaID ? [["a", { href: url, target: "_blank", rel: "noopener noreferrer" }, ["img", { src: media(file.previewMediaID), alt: asset.name, loading: "lazy" }]]] : []), link];
       return ["figure", attrs, link];
     } }),
-    Node.create({ name: "inlineProperty", group: "block", atom: true, addAttributes: () => defaults({ property: null }), renderHTML: ({ node }) => {
+    Node.create({ name: "inlineProperty", group: "block", atom: true, addAttributes: () => defaults({ property: null, readerClipSaved: false }), renderHTML: ({ node }) => {
       const property = normalizeProperty(node.attrs.property), kind = PROPERTY_KINDS.find(item => item.kind === property.kind);
+      const saved = node.attrs.readerClipSaved && property.kind === "date" ? clipSavedDate(property.value) : null;
+      if (saved) return ["div", { class: "vellix-property reader-property penned-clip-saved" },
+        ["span", { class: "vellix-property-name" }, property.name || "Saved"],
+        ["div", { class: "vellix-property-value" }, ["span", { class: "vellix-property-date" }, icon("numcal"), ["span", {}, saved.day]],
+          ...(property.includeTime ? [["span", { class: "penned-clip-saved-time" }, "at " + saved.time]] : [])]];
       const value = { text: property.kind === "number" && property.value ? `${property.prefix}${property.value}${property.suffix}` : property.value,
         checked: property.kind === "checkbox" ? property.checked : undefined,
         chips: property.options.filter(option => property.selectedOptionIDs.includes(option.id)) };
@@ -217,8 +223,12 @@ export function publicExtensions(options) {
   ];
   const blocks = [
     ...["callout", "plainCallout", "blockquote", "toggleItem"].map(name => Node.create({ name, group: "block", content: "block+", defining: true,
-      addAttributes: () => defaults({ color: "#ffffff", icon: "sparkle", open: true }), renderHTML: ({ node, HTMLAttributes }) => {
+      addAttributes: () => defaults({ color: "#ffffff", icon: "sparkle", open: true, clipSource: null }), renderHTML: ({ node, HTMLAttributes }) => {
         const color = validColor(node.attrs.color) || "#ffffff";
+        const source = name === "plainCallout" ? clipSource(node.attrs.clipSource) : null;
+        if (source) return ["div", { ...HTMLAttributes, class: "vellix-plain-callout penned-clip-source" },
+          clipPreview(source, source.file?.mediaID ? media(source.file.previewMediaID || source.file.mediaID) : ""),
+          ["div", { class: "vellix-plain-callout-text penned-clip-source-content" }, 0]];
         if (name === "toggleItem") return ["div", { ...HTMLAttributes, class: "reader-toggle", "data-reader-toggle": String(node.attrs.open !== false) }, 0];
         if (name === "blockquote") return ["blockquote", { ...HTMLAttributes, "data-blockquote-color": color, style: `--vellix-blockquote-color:${color}` }, 0];
         return ["div", { ...HTMLAttributes, class: name === "callout" ? "vellix-callout" : "vellix-plain-callout", style: `--vellix-callout-color:${color}` },
@@ -258,7 +268,7 @@ export function publicExtensions(options) {
 export function renderPublicContent(document, options) {
   const root = structuredClone(document.content), toc = [];
   let count = 0;
-  function headings(node, depth) {
+  function headings(node, depth, inSource = false) {
     if (++count > 20000 || depth > 64) throw new Error("Publication content exceeds its limits");
     const section = node.type === "publishedCollection" ? node.attrs?.projection?.name
       : node.type === "publishedPage" ? node.attrs?.preview?.title : node.type === "table" ? node.attrs?.name : null;
@@ -269,7 +279,9 @@ export function renderPublicContent(document, options) {
       if (node.type === "publishedPage") node.attrs.preview.readerAnchor = id;
       toc.push({ id, level: node.attrs.level || 1, text: section || text(node) });
     }
-    for (const child of node.content || []) headings(child, depth + 1);
+    if (inSource && node.type === "inlineProperty") node.attrs = { ...node.attrs, readerClipSaved: true };
+    const source = node.type === "plainCallout" && !!clipSource(node.attrs?.clipSource);
+    for (const child of node.content || []) headings(child, depth + 1, source);
   }
   headings(root, 0); tablePresentation(root);
   const extensions = publicExtensions({ ...options, media: document.media });

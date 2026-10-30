@@ -6,7 +6,7 @@ import { videoPlayer } from "./video-player.js";
 import { attachmentActions } from "./attachment-actions.js";
 
 const modes = { image: ["inline", "fullWidth", "card"], pdf: ["preview", "card"], video: ["player", "card"], audio: ["player", "card"], file: ["card"] };
-export function containsAttachments(nodes) { return nodes.some(node => node.type === "attachment" || containsAttachments(node.content || [])); }
+export function containsAttachments(nodes) { return nodes.some(node => node.type === "attachment" || node.attrs?.clipSource?.file?.relativePath || containsAttachments(node.content || [])); }
 export function attachmentLayout(file, attrs = {}) {
   const kind = Object.hasOwn(modes, file?.kind) ? file.kind : "file";
   return { mode: modes[kind].includes(attrs.displayMode) ? attrs.displayMode : modes[kind][0],

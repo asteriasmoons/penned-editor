@@ -757,6 +757,85 @@
         cursor: pointer;
       }
 
+      .vellix-plain-callout.penned-clip-source {
+        display: block;
+        min-height: 0;
+        padding: 10px 12px 12px;
+        background: #292929;
+        border: 0;
+        border-radius: 8px;
+        color: var(--vellix-primary-text);
+      }
+      .penned-clip-source-link {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-width: 0;
+        min-height: 38px;
+        padding: 4px 10px 4px 4px;
+        border-radius: 6px;
+        background: #202020;
+        color: #d5d5d5 !important;
+        font: inherit;
+        font-weight: 400;
+        text-decoration: none !important;
+      }
+      .penned-clip-source-link img {
+        flex: 0 0 48px;
+        width: 48px !important;
+        height: 30px !important;
+        margin: 0 !important;
+        border-radius: 3px;
+        object-fit: cover;
+      }
+      .penned-clip-source-title {
+        display: block;
+        flex: 1 1 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .penned-clip-source-content {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding-top: 14px;
+        color: #d5d5d5;
+      }
+      .penned-clip-source .penned-clip-source-content > * {
+        margin: 0 !important;
+      }
+      .penned-clip-source .penned-clip-saved {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        color: #a7a7a7;
+        font-size: 12px;
+      }
+      .penned-clip-saved .vellix-property-name,
+      .penned-clip-saved .vellix-property-value {
+        width: auto;
+        min-height: 0;
+        font-weight: 400;
+      }
+      .penned-clip-saved .vellix-property-value { flex-wrap: wrap; }
+      .penned-clip-saved .vellix-property-name { flex: 0 0 auto; }
+      .penned-clip-saved .vellix-property-date {
+        width: auto;
+        min-height: 0;
+        padding: 2px 5px;
+        border-radius: 4px;
+        gap: 4px;
+        background: color-mix(in srgb, var(--vellix-property-accent) 16%, transparent);
+        color: var(--vellix-property-accent);
+        font-size: inherit;
+      }
+      .penned-clip-saved-time { white-space: nowrap; }
+
       .tiptap-editor ul,
       .tiptap-editor ol {
         margin: 4px 0;
