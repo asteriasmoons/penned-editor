@@ -7,6 +7,7 @@ import { createTextColor, textColorDependencies } from "./text-color.js";
 import { Caption } from "./caption.js";
 import { normalizeProperty, propertyURL, PROPERTY_KINDS } from "./inline-properties.js";
 import { clipSource, clipPreview, clipSavedDate } from "./clip-source.js";
+import { calloutWidth, calloutRowMetrics } from "./callout-layout.js";
 import { componentDefinition, componentResponse } from "./template-components.js";
 import "./table-formulas.js";
 
@@ -222,16 +223,23 @@ export function publicExtensions(options) {
     } }),
   ];
   const blocks = [
+    Node.create({ name: "plainCalloutRow", group: "block", content: "block*",
+      renderHTML: ({ node }) => ["div", { class: "penned-callout-row", "data-plain-callout-row": "",
+        style: `--penned-callout-gap-share:${calloutRowMetrics(node.content.content).gapShare}px;` },
+        ["div", { class: "penned-callout-row-content" }, 0]] }),
     ...["callout", "plainCallout", "blockquote", "toggleItem"].map(name => Node.create({ name, group: "block", content: "block+", defining: true,
-      addAttributes: () => defaults({ color: "#ffffff", icon: "sparkle", open: true, clipSource: null }), renderHTML: ({ node, HTMLAttributes }) => {
+      addAttributes: () => defaults({ color: "#ffffff", icon: "sparkle", open: true, clipSource: null,
+        ...(name === "plainCallout" ? { widthPercent: null } : {}) }), renderHTML: ({ node, HTMLAttributes }) => {
         const color = validColor(node.attrs.color) || "#ffffff";
+        const width = name === "plainCallout" && calloutWidth(node.attrs.widthPercent);
+        const widthStyle = width ? `--penned-callout-width:${width}%;` : "";
         const source = name === "plainCallout" ? clipSource(node.attrs.clipSource) : null;
-        if (source) return ["div", { ...HTMLAttributes, class: "vellix-plain-callout penned-clip-source" },
+        if (source) return ["div", { ...HTMLAttributes, class: "vellix-plain-callout penned-clip-source", style: widthStyle },
           clipPreview(source, source.file?.mediaID ? media(source.file.previewMediaID || source.file.mediaID) : ""),
           ["div", { class: "vellix-plain-callout-text penned-clip-source-content" }, 0]];
         if (name === "toggleItem") return ["div", { ...HTMLAttributes, class: "reader-toggle", "data-reader-toggle": String(node.attrs.open !== false) }, 0];
         if (name === "blockquote") return ["blockquote", { ...HTMLAttributes, "data-blockquote-color": color, style: `--vellix-blockquote-color:${color}` }, 0];
-        return ["div", { ...HTMLAttributes, class: name === "callout" ? "vellix-callout" : "vellix-plain-callout", style: `--vellix-callout-color:${color}` },
+        return ["div", { ...HTMLAttributes, class: name === "callout" ? "vellix-callout" : "vellix-plain-callout", style: `${widthStyle}--vellix-callout-color:${color}` },
           ...(name === "callout" ? [["span", { class: "vellix-callout-icon-button", "aria-hidden": "true", style: `color:${color}` }, icon(node.attrs.icon)]] : []),
           ["div", { class: name === "callout" ? "vellix-callout-text" : "vellix-plain-callout-text" }, 0]];
       } })),

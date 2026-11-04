@@ -144,6 +144,7 @@ export function createBlockActions({ editor, blocks, elementForBlock, selectionA
         to = $from.after();
       }
       const transaction = closeHistory(editor.state.tr).delete(from, to);
+      transaction.setMeta("pennedPlaceholderDeletion", [{ from, to }]);
       if (!transaction.doc.childCount) transaction.insert(0, editor.schema.nodes.paragraph.create());
       editor.view.dispatch(transaction);
       editor.view.dispatch(closeHistory(editor.state.tr));

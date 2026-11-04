@@ -3,6 +3,7 @@ import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { closeHistory } from "@tiptap/pm/history";
 import { Mapping } from "@tiptap/pm/transform";
+import { createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
 
 export function cleanTagName(input) {
   const value = String(input ?? "").trim().replace(/^#/, "").normalize("NFC");
@@ -32,6 +33,7 @@ export function taggedInlineContent(node) {
 
 export function createDocumentTags({ post, snapshot, selectionActive, reportHeight }) {
   const key = new PluginKey("pennedDocumentTags");
+  const hasID = node => "id" in node.attrs;
   const pending = new Map();
   let catalogue = [], menu = null, active = null, highlighted = null;
   let highlightBlockID = null, liveEditor = null;
@@ -147,14 +149,14 @@ export function createDocumentTags({ post, snapshot, selectionActive, reportHeig
       return [new Plugin({
         key,
         state: {
-          init: () => null,
-          apply(tr) {
+          init: (_config, state) => createNodeIndex(state.doc, hasID),
+          apply(tr, index) {
             for (const [token, value] of pending) if (value.kind === "input") {
               const from = tr.mapping.mapResult(value.from, -1), to = tr.mapping.mapResult(value.to, 1);
               if (from.deletedAcross || to.deletedAcross || tr.doc.textBetween(from.pos, to.pos) !== value.text) pending.delete(token);
               else { value.from = from.pos; value.to = to.pos; }
             }
-            return null;
+            return updateNodeIndex(index, tr, hasID);
           },
         },
         appendTransaction(transactions, old, state) {
@@ -162,20 +164,19 @@ export function createDocumentTags({ post, snapshot, selectionActive, reportHeig
           const seen = new Set(), tr = state.tr;
           const mapping = new Mapping(), preserved = new Map();
           transactions.forEach(transaction => mapping.appendMapping(transaction.mapping));
-          old.doc.descendants((node, pos) => {
-            if (!node.attrs.id) return;
+          for (const { node, pos } of key.getState(old).records) {
+            if (!node.attrs.id) continue;
             const mapped = mapping.mapResult(pos, 1);
             if (!mapped.deletedAcross && state.doc.nodeAt(mapped.pos)?.attrs.id === node.attrs.id) preserved.set(node.attrs.id, mapped.pos);
-          });
-          state.doc.descendants((node, pos) => {
-            if (!("id" in node.attrs)) return;
+          }
+          for (const { node, pos } of key.getState(state).records) {
             let id = node.attrs.id;
             // A paste before its source must not steal the original block's navigation ID.
             if (!id || (preserved.has(id) ? preserved.get(id) !== pos : seen.has(id))) {
               id = crypto.randomUUID(); tr.setNodeMarkup(pos, undefined, { ...node.attrs, id });
             }
             seen.add(id);
-          });
+          }
           return tr.docChanged ? tr : null;
         },
         props: {
@@ -198,10 +199,10 @@ export function createDocumentTags({ post, snapshot, selectionActive, reportHeig
           decorations(state) {
             if (!highlightBlockID) return null;
             const decorations = [];
-            state.doc.descendants((node, pos) => {
+            for (const { node, pos } of key.getState(state).records) {
               if (node.isBlock && node.attrs.id === highlightBlockID)
                 decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: "penned-tag-destination" }));
-            });
+            }
             return DecorationSet.create(state.doc, decorations);
           },
         },

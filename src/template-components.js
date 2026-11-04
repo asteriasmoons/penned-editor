@@ -254,7 +254,11 @@ export function createTemplateComponents({ Node, post, snapshot, selectionActive
     }
   });
   function command(editor, name, args) {
-    if (name === "setTemplateEditing") { templateEditing = args.enabled === true; views.forEach(render => render()); return true; }
+    if (name === "setTemplateEditing") {
+      templateEditing = args.enabled === true && typeof args.templateID === "string" && !!args.templateID.trim() &&
+        typeof args.documentID === "string" && !!args.documentID.trim();
+      views.forEach(render => render()); return true;
+    }
     if (!name.startsWith("templateComponent")) return undefined;
     if (!templateEditing || !editor.isEditable || selectionActive()) return false;
     const definition = name === "templateComponentSave" ? componentDefinition(args.definition) : null;

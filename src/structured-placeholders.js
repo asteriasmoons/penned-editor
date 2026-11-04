@@ -24,10 +24,76 @@
     }).join("");
   }
   function createExtension(api) {
-    const { Extension, Plugin, PluginKey, Decoration, DecorationSet, TextSelection } = api;
+    const { Extension, Plugin, PluginKey, Decoration, DecorationSet, TextSelection, NodeSelection, ReplaceStep, isHistoryTransaction } = api;
     const key = new PluginKey("vellixStructuredPlaceholders");
     const control = { template: false, active: false, request: null, editor: null };
     function eligible(node) { return node && node.isTextblock; }
+    function isProtected(node) { return control.template && !control.active && !!node?.attrs.placeholderEnabled; }
+    const marked = node => !node.isText && (node.attrs.placeholderEnabled || node.attrs.placeholderProjection);
+    function buildIndex(doc) {
+      if (global.PennedIncrementalNodes) return global.PennedIncrementalNodes.createNodeIndex(doc, marked);
+      const records = [];
+      doc.descendants((node, pos) => { if (marked(node)) records.push({ node, pos }); return !node.isText; });
+      return { doc, records };
+    }
+    const regions = state => (key.getState(state) || buildIndex(state.doc)).records;
+    function lockedOwner(position) {
+      for (let depth = 1; depth <= position.depth; depth++) {
+        if (position.node(depth).attrs.placeholderEnabled) return { node: position.node(depth), pos: position.before(depth) };
+      }
+      return null;
+    }
+    function selectedDeletionRanges(tr, state) {
+      const explicit = tr.getMeta("pennedPlaceholderDeletion");
+      if (Array.isArray(explicit)) return explicit.filter(range => range && Number.isInteger(range.from) &&
+        Number.isInteger(range.to) && range.from >= 0 && range.to <= state.doc.content.size && range.from < range.to);
+      if (state.selection.empty || !tr.steps.length || ["paste", "drop"].includes(tr.getMeta("uiEvent"))) return [];
+      const deletion = tr.steps.every((step, index) => {
+        if (!(step instanceof ReplaceStep)) return false;
+        if (!step.slice.size) return true;
+        // Deleting a parent's last block uses its required empty paragraph.
+        const filler = step.slice.content.firstChild;
+        const from = tr.docs[index].resolve(step.from), to = tr.docs[index].resolve(step.to);
+        return from.sameParent(to) && step.from === from.start() && step.to === from.end() &&
+          !step.slice.openStart && !step.slice.openEnd && step.slice.content.childCount === 1 &&
+          filler.type.name === "paragraph" && !filler.content.size && !filler.attrs.placeholderEnabled;
+      });
+      return deletion ? state.selection.ranges.map(range => ({ from: range.$from.pos, to: range.$to.pos })) : [];
+    }
+    function preservesLockedRegions(tr, state) {
+      let byID;
+      const deletions = selectedDeletionRanges(tr, state);
+      const history = isHistoryTransaction(tr);
+      for (const region of regions(state)) {
+        if (!region.node.attrs.placeholderEnabled) continue;
+        const start = tr.mapping.mapResult(region.pos, 1);
+        const end = tr.mapping.map(region.pos + region.node.nodeSize, -1);
+        const next = !start.deleted && tr.doc.nodeAt(start.pos);
+        if (next && next.nodeSize === end - start.pos && next.eq(region.node)) continue;
+        // Established block commands can replace the full document. Unchanged
+        // placeholders must retain their identity; selected deletions are scoped below.
+        const id = region.node.attrs.id;
+        if (id && !byID) {
+          byID = new Map();
+          tr.doc.descendants(node => {
+            if (node.attrs.id) {
+              const list = byID.get(node.attrs.id) || [];
+              list.push(node); byID.set(node.attrs.id, list);
+            }
+            return !node.isText;
+          });
+        }
+        const matches = id ? byID.get(id) || [] : [];
+        if (matches.length === 1 && matches[0].eq(region.node)) continue;
+        // Selection deletion may remove a whole placeholder, never edit one
+        // in place. History replays those removals through the existing undo stack.
+        if (matches.length) return false;
+        if (deletions.some(range => range.from <= region.pos && range.to >= region.pos + region.node.nodeSize)) continue;
+        if (history && id) continue;
+        return false;
+      }
+      return true;
+    }
     function current(state) {
       const selection = state.selection;
       for (let depth = selection.$from.depth; depth > 0; depth--) {
@@ -45,11 +111,7 @@
     }
     function projectionTransaction(state) {
       let tr = state.tr;
-      const regions = [];
-      state.doc.descendants(function (node, pos) {
-        if (eligible(node)) regions.push({ node: node, pos: pos });
-      });
-      regions.reverse().forEach(function (region) {
+      regions(state).filter(region => eligible(region.node)).slice().reverse().forEach(function (region) {
         const node = region.node, pos = region.pos;
         const attrs = { ...node.attrs };
         if (control.template && control.active && attrs.placeholderEnabled) {
@@ -71,13 +133,16 @@
       const editor = control.editor;
       if (!editor) return;
       const tr = projectionTransaction(editor.state) || editor.state.tr;
+      if (control.active && tr.selection.node?.isTextblock && tr.selection.node.attrs.placeholderEnabled) {
+        tr.setSelection(TextSelection.create(tr.doc, tr.selection.from + 1));
+      }
       tr.setMeta(key, true).setMeta("addToHistory", false);
       editor.view.dispatch(tr);
       editor.view.dom.classList.toggle("vellix-placeholder-authoring", control.template && control.active);
     }
     function change(action, token) {
       const editor = control.editor;
-      if (!control.template || !editor) return false;
+      if (!control.template || !control.active || !editor || editor.isEditable === false) return false;
       let target = current(editor.state);
       if (token) {
         const pending = control.request;
@@ -153,27 +218,52 @@
       }
       return Math.max(1, text.split("\n").reduce(function (count, line) { return count + Math.max(1, Math.ceil(line.length / 32)); }, 0)) * 24;
     }
-    function preserveGuidance(oldState, state) {
+    function preserveGuidance(oldState, state, transactions) {
       if (!control.template) return null;
       const tr = state.tr;
-      oldState.doc.descendants(function (old) {
+      regions(oldState).forEach(function (region) {
+        const old = region.node;
         if (!eligible(old) || !old.attrs.placeholderEnabled || !old.attrs.id) return;
-        state.doc.descendants(function (node, pos) {
-          if (node.attrs.id !== old.attrs.id || node.type === old.type) return;
+        let pos = region.pos;
+        transactions.forEach(transaction => { pos = transaction.mapping.map(pos, 1); });
+        const node = state.doc.nodeAt(pos);
+        if (node && node.attrs.id === old.attrs.id && node.type !== old.type) {
           let target = eligible(node) ? { node: node, pos: pos } : null;
           if (!target) node.descendants(function (child, offset) {
             if (!target && eligible(child)) target = { node: child, pos: pos + 1 + offset };
           });
           if (target && !target.node.attrs.placeholderEnabled) {
             tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs,
-              placeholderEnabled: true, placeholderGuidance: old.attrs.placeholderProjection ? (old.content.toJSON() || []) : old.attrs.placeholderGuidance });
+              placeholderEnabled: true, placeholderProjection: old.attrs.placeholderProjection === true,
+              placeholderGuidance: old.attrs.placeholderProjection ? (old.content.toJSON() || []) : old.attrs.placeholderGuidance });
           }
-        });
+        }
       });
       return tr.steps.length ? tr.setMeta(key, true) : null;
     }
+    function guardSelection(state, oldState, transactions) {
+      // A selected range is not an editing caret. Keep native text/block
+      // selection intact; filterTransaction separately protects the content.
+      if (!(state.selection instanceof TextSelection) || !state.selection.empty) return null;
+      const target = lockedOwner(state.selection.$head) || lockedOwner(state.selection.$anchor);
+      if (!target) return null;
+      if (oldState.selection instanceof TextSelection &&
+          !transactions.some(tr => tr.getMeta("pennedPlaceholderDocumentLoad"))) {
+        let previous = oldState.selection.getBookmark();
+        for (const tr of transactions) previous = previous.map(tr.mapping);
+        previous = previous.resolve(state.doc);
+        if (previous instanceof TextSelection && !lockedOwner(previous.$head) && !lockedOwner(previous.$anchor)) {
+          return state.tr.setSelection(previous).setMeta(key, true).setMeta("addToHistory", false);
+        }
+      }
+      // A newly loaded or just-locked placeholder is read-only, not a new
+      // insertion point. Normal taps elsewhere still use the editor's own caret path.
+      return state.tr.setSelection(NodeSelection.create(state.doc, target.pos))
+        .setMeta(key, true).setMeta("addToHistory", false);
+    }
     return Extension.create({
       name: "vellixStructuredPlaceholders",
+      addStorage() { return { isProtected }; },
       addGlobalAttributes() {
         const types = this.extensions.filter(function (extension) { return extension.type === "node" && extension.name !== "text"; }).map(function (extension) { return extension.name; });
         return [{
@@ -206,8 +296,11 @@
           args = args || {};
           if (name === "getDocument") return editor.getJSON();
           if (name === "setTemplateEditing") {
+            if (args.enabled === true && !(typeof args.templateID === "string" && args.templateID.trim() &&
+                typeof args.documentID === "string" && args.documentID.trim())) return false;
             control.template = args.enabled === true;
-            if (!control.template) control.active = false;
+            control.active = control.template && args.placeholderMode === true;
+            control.request = null;
             refresh();
             await command(name, args);
             return true;
@@ -215,6 +308,7 @@
           if (name === "setPlaceholderMode") {
             if (!control.template || editor.isEditable === false) return false;
             control.active = args.active === true;
+            if (!control.active) control.request = null;
             if (control.active) {
               const target = current(editor.state);
               if (target && !target.node.attrs.placeholderEnabled) {
@@ -234,13 +328,24 @@
           return command(name, args);
         };
         const style = document.createElement("style");
-        style.textContent = ".vellix-guided-empty::before{content:attr(data-vellix-guidance);float:left;height:0;max-width:100%;white-space:pre-wrap;color:currentColor;opacity:.38;pointer-events:none;user-select:none;-webkit-user-select:none;font-style:italic}.vellix-placeholder-authoring .vellix-guidance-region{color:color-mix(in srgb,currentColor 58%,transparent);font-style:italic}.vellix-placeholder-authoring .vellix-guidance-active{outline:1px dashed color-mix(in srgb,currentColor 25%,transparent);outline-offset:3px;border-radius:3px}";
+        style.textContent = ".vellix-guided-empty{display:flow-root;min-height:0 !important}.vellix-guided-empty::before{content:attr(data-vellix-guidance);float:left;width:100%;height:auto;margin-right:-100%;white-space:pre-wrap;color:currentColor;opacity:.38;pointer-events:none;user-select:none;-webkit-user-select:none;font-style:italic}.vellix-placeholder-authoring .vellix-guidance-region{color:color-mix(in srgb,currentColor 58%,transparent);font-style:italic}.vellix-placeholder-authoring .vellix-guidance-active{outline:1px dashed color-mix(in srgb,currentColor 25%,transparent);outline-offset:3px;border-radius:3px}";
         document.head.appendChild(style);
       },
       addProseMirrorPlugins() {
         return [new Plugin({
           key: key,
+          state: {
+            init: (_config, state) => buildIndex(state.doc),
+            apply(tr, index) {
+              if (!tr.docChanged) return index;
+              return global.PennedIncrementalNodes
+                ? global.PennedIncrementalNodes.updateNodeIndex(index, tr, marked) : buildIndex(tr.doc);
+            }
+          },
           filterTransaction(tr, state) {
+            if (control.template && !control.active) {
+              return !tr.docChanged || tr.getMeta(key) || tr.getMeta("pennedPlaceholderDocumentLoad") || preservesLockedRegions(tr, state);
+            }
             if (!control.template || !control.active || !tr.docChanged || tr.getMeta(key) ||
                 Object.keys(tr.meta).some(function (name) { return name.indexOf("history") >= 0; })) return true;
             const target = current(state);
@@ -256,8 +361,13 @@
             return true;
           },
           appendTransaction(transactions, oldState, state) {
+            if (control.template && !control.active &&
+                transactions.some(function (tr) { return tr.selectionSet || tr.docChanged || tr.getMeta(key); })) {
+              const guard = guardSelection(state, oldState, transactions);
+              if (guard) return guard;
+            }
             if (!transactions.some(function (tr) { return tr.docChanged; })) return null;
-            const retained = preserveGuidance(oldState, state);
+            const retained = preserveGuidance(oldState, state, transactions);
             if (retained) return retained;
             if (control.template && control.active) {
               const target = current(state);
@@ -283,16 +393,20 @@
             },
             decorations(state) {
               const decorations = [];
-              state.doc.descendants(function (node, pos) {
-                if (!eligible(node) || !node.attrs.placeholderEnabled) return;
+              regions(state).forEach(function ({ node, pos }) {
+                if (!node.attrs.placeholderEnabled) return;
+                const locked = control.template && !control.active ? {
+                  contenteditable: "false", "data-penned-placeholder-locked": "true",
+                } : {};
                 if (node.attrs.placeholderProjection) {
                   const active = state.selection.from >= pos && state.selection.from <= pos + node.nodeSize;
                   decorations.push(Decoration.node(pos, pos + node.nodeSize,
-                    { class: "vellix-guidance-region" + (active ? " vellix-guidance-active" : "") }));
+                    { ...locked, class: "vellix-guidance-region" + (active ? " vellix-guidance-active" : "") }));
                 } else if (node.content.size === 0) {
                   decorations.push(Decoration.node(pos, pos + node.nodeSize,
-                    { class: "vellix-guided-empty", "data-vellix-guidance": guidanceText(node.attrs.placeholderGuidance),
-                      style: "min-height:" + placeholderHeight(node, pos) + "px" }));
+                    { ...locked, class: "vellix-guided-empty", "data-vellix-guidance": guidanceText(node.attrs.placeholderGuidance) }));
+                } else if (control.template && !control.active) {
+                  decorations.push(Decoration.node(pos, pos + node.nodeSize, locked));
                 }
               });
               return DecorationSet.create(state.doc, decorations);

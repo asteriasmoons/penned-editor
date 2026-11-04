@@ -61,7 +61,7 @@ test("template-only creation, configuration, reordering and removal round-trip t
   const h = await runtime([paragraph("Permanent text")]);
   try {
     assert.equal(await h.command("templateComponentSave", { definition: definition("rating") }), false);
-    await h.command("setTemplateEditing", { enabled: true });
+    await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
     for (const kind of kinds) assert.equal(await h.command("templateComponentSave", { definition: definition(kind) }), true);
     let saved = await h.json();
     const nodes = saved.content.filter(node => node.type === "templateComponent");
@@ -85,7 +85,7 @@ test("template-only creation, configuration, reordering and removal round-trip t
 test("template controls reopen configuration without saving Daily Note answers", async () => {
   const h = await runtime();
   try {
-    await h.command("setTemplateEditing", { enabled: true });
+    await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
     const before = await h.json();
     h.click("rating", 3); h.click("singleSelect", 2); h.click("multiSelect", 1);
     assert.equal(h.events.filter(event => event.kind === "templateComponentConfigure").length, 3);
@@ -126,7 +126,7 @@ test("unlabeled ratings sit snugly below their paragraph in templates and notes 
   const h = await runtime([paragraph("Your words will give meaning to the number."), rating]);
   try {
     for (const enabled of [true, false]) {
-      await h.command("setTemplateEditing", { enabled });
+      await h.command("setTemplateEditing", { enabled, documentID: "template-document", templateID: enabled ? "template-record" : null });
       const host = h.host("rating"), style = h.window.getComputedStyle(host);
       assert.equal(style.marginTop, "6px");
       assert.equal(style.paddingTop, "0px");
@@ -150,7 +150,7 @@ test("insertion leaves a collapsed text caret after the component instead of sel
     [{ type: "plainCallout", attrs: { id: "container", color: "#FFFFFF" }, content: [paragraph("Nested paragraph")] }]]) {
     const h = await runtime(content);
     try {
-      await h.command("setTemplateEditing", { enabled: true });
+      await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
       await h.command("focusDocumentEnd");
       assert.equal(await h.command("templateComponentSave", { definition: { ...definition("slider"), label: "" } }), true);
       await new Promise(resolve => h.window.requestAnimationFrame(() => h.window.requestAnimationFrame(resolve)));
@@ -172,7 +172,7 @@ test("blank slider labels stay blank and unanswered sliders show no status while
   const sliderNode = component("slider"); sliderNode.attrs.definition.label = "";
   const h = await runtime([paragraph("Energy level"), sliderNode]);
   try {
-    await h.command("setTemplateEditing", { enabled: true });
+    await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
     const saved = await h.json(), host = h.host("slider");
     assert.equal(host.querySelector(".penned-component-question"), null);
     assert(!host.textContent.includes("Slider"));
@@ -420,7 +420,7 @@ test("range input remains native, preserves its identity throughout dragging and
 test("template configuration uses the same focus-safe component taps for every kind without writing responses", async () => {
   const h = await runtime();
   try {
-    await h.command("setTemplateEditing", { enabled: true });
+    await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
     const before = await h.json();
     for (const kind of kinds) {
       idleEditor(h);

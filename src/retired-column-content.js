@@ -4,8 +4,9 @@ export function unwrapRetiredColumns(nodes) {
     if (node.type === "columns" || node.type === "column") {
       return unwrapRetiredColumns(node.content ?? []);
     }
-    return Array.isArray(node.content)
-      ? [{ ...node, content: unwrapRetiredColumns(node.content) }]
-      : [node];
+    if (!Array.isArray(node.content)) return [node];
+    const content = unwrapRetiredColumns(node.content);
+    if (node.type === "plainCalloutRow" && !content.length) return [];
+    return [{ ...node, content }];
   });
 }

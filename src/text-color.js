@@ -2,12 +2,22 @@ import { Mark, Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
 
 // The editor owns the held range. Native UI receives only an opaque token.
 export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelection, closeHistory, Decoration, DecorationSet,
   post, snapshot, selectionActive }) {
   const key = new PluginKey("vellixInlineTextColor");
   const gradientKey = new PluginKey("vellixInlineGradientLayout");
+  const gradientBlocks = new WeakMap();
+  const hasGradient = node => {
+    if (!node.isTextblock) return false;
+    if (gradientBlocks.has(node)) return gradientBlocks.get(node);
+    let found = false;
+    node.forEach(child => { if (child.marks.some(mark => mark.type.name === "textStyle" && mark.attrs.gradient)) found = true; });
+    gradientBlocks.set(node, found);
+    return found;
+  };
   let sequence = 0;
   function color(value) {
     if (typeof value !== "string") return null;
@@ -79,6 +89,8 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
   function gradientView(view) {
     const doc = view.dom.ownerDocument, win = doc.defaultView;
     let frame = 0, destroyed = false;
+    let appearanceRevision = 0;
+    const paintedBlocks = new WeakMap();
     const stylesheet = doc.createElement("style");
     // Only the fallback mark background is suppressed. Block fills, layout and
     // text remain untouched; ProseMirror owns every generated inline span.
@@ -119,13 +131,20 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
     function paint() {
       frame = 0;
       if (destroyed || view.isDestroyed) return;
-      const blocks = new Set();
-      for (const span of view.dom.querySelectorAll("span[data-vellix-gradient]")) {
-        const block = span.closest("p,h1,h2,h3,h4,h5,h6,pre,figcaption");
-        if (block && view.dom.contains(block)) blocks.add(block);
-      }
       const decorations = [], signature = [];
-      for (const block of blocks) {
+      for (const record of gradientKey.getState(view.state).index.records) {
+        const block = view.nodeDOM(record.pos);
+        if (!(block instanceof win.HTMLElement)) continue;
+        const computed = win.getComputedStyle(block);
+        const layout = [appearanceRevision, block.clientWidth, computed.font, computed.lineHeight, computed.letterSpacing].join(":");
+        const cached = paintedBlocks.get(record.node);
+        if (cached?.layout === layout) {
+          for (const part of cached.parts) decorations.push(Decoration.inline(record.pos + part.from, record.pos + part.to,
+            { class: "vellix-gradient-fragment", style: part.css }));
+          signature.push([record.node.attrs.id, cached.parts]);
+          continue;
+        }
+        const parts = [];
         const walker = doc.createTreeWalker(block, win.NodeFilter.SHOW_TEXT), groups = [];
         let node, current = null;
         while ((node = walker.nextNode())) {
@@ -165,9 +184,11 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
               "background-clip:text!important;-webkit-background-clip:text!important;color:transparent!important;" +
               "-webkit-text-fill-color:transparent!important;box-decoration-break:clone;-webkit-box-decoration-break:clone";
             decorations.push(Decoration.inline(from, to, { class: "vellix-gradient-fragment", style: css }));
-            signature.push([from, to, css]);
+            parts.push({ from: from - record.pos, to: to - record.pos, css });
           }
         }
+        paintedBlocks.set(record.node, { layout, parts });
+        signature.push([record.node.attrs.id, parts]);
       }
       const next = JSON.stringify(signature);
       if (gradientKey.getState(view.state).signature === next) return;
@@ -181,17 +202,18 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
     const resize = new win.ResizeObserver(schedule);
     resize.observe(view.dom);
     // Native font/appearance updates live here, outside the editable document.
-    const appearance = new win.MutationObserver(schedule);
+    const invalidateAppearance = () => { appearanceRevision++; schedule(); };
+    const appearance = new win.MutationObserver(invalidateAppearance);
     appearance.observe(doc.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
-    doc.fonts?.addEventListener("loadingdone", schedule);
-    void doc.fonts?.ready.then(schedule);
+    doc.fonts?.addEventListener("loadingdone", invalidateAppearance);
+    void doc.fonts?.ready.then(invalidateAppearance);
     schedule();
     return {
       update(_view, previous) { if (view.state.doc !== previous.doc) schedule(); },
       destroy() {
         destroyed = true; win.cancelAnimationFrame(frame);
         resize.disconnect(); appearance.disconnect(); stylesheet.remove();
-        doc.fonts?.removeEventListener("loadingdone", schedule);
+        doc.fonts?.removeEventListener("loadingdone", invalidateAppearance);
       },
     };
   }
@@ -214,13 +236,15 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
       } }), new Plugin({
         key: gradientKey,
         state: {
-          init: () => ({ decorations: DecorationSet.empty, signature: "" }),
+          init: (_config, state) => ({ decorations: DecorationSet.empty, signature: "", index: createNodeIndex(state.doc, hasGradient) }),
           apply(tr, previous) {
             const next = tr.getMeta(gradientKey);
-            if (next) return next;
-            // Drop old spans on content edits so new text keeps the normal mark
-            // fallback until geometry is refreshed. Never write paint into JSON.
-            return tr.docChanged ? { decorations: DecorationSet.empty, signature: "" } : previous;
+            if (next) return { ...previous, ...next };
+            if (!tr.docChanged) return previous;
+            const index = updateNodeIndex(previous.index, tr, hasGradient);
+            const changed = index.records.length !== previous.index.records.length ||
+              index.records.some((record, i) => record.node !== previous.index.records[i]?.node);
+            return { index, decorations: previous.decorations.map(tr.mapping, tr.doc), signature: changed ? "" : previous.signature };
           },
         },
         props: { decorations: state => gradientKey.getState(state)?.decorations ?? DecorationSet.empty },

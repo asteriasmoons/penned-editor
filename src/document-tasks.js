@@ -1,5 +1,13 @@
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
+import { createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
+
+const reportedSnapshots = new WeakSet();
+function taskSnapshot(doc, post, canonicalize) {
+  if (reportedSnapshots.has(doc)) return;
+  reportedSnapshots.add(doc);
+  post("taskSnapshot", { document: canonicalize(doc.toJSON()) });
+}
 
 export function independentTask(task) {
   return task ? { ...task, id: crypto.randomUUID(), occurrenceID: crypto.randomUUID(), history: [] } : null;
@@ -153,6 +161,8 @@ export function createChecklistItem(TaskItem, { post, selectionActive, reportHei
 }
 
 export function createTaskIntegration({ Extension, Plugin, PluginKey, post, selectionActive, canonicalize }) {
+  const pluginKey = new PluginKey("vellixTrackedTasks");
+  const isTask = node => node.type.name === "taskItem";
   return Extension.create({
     name: "vellixTrackedTasks",
     addGlobalAttributes() {
@@ -160,7 +170,11 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
     },
     addProseMirrorPlugins() {
       return [new Plugin({
-        key: new PluginKey("vellixTrackedTasks"),
+        key: pluginKey,
+        state: {
+          init: (_config, state) => createNodeIndex(state.doc, isTask),
+          apply: (tr, index) => updateNodeIndex(index, tr, isTask),
+        },
         props: {
           transformPasted(slice) {
             const copy = fragment => Fragment.fromArray(Array.from({ length: fragment.childCount }, (_, i) => {
@@ -174,9 +188,13 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
         },
         appendTransaction(transactions, old, state) {
           if (!transactions.some(tr => tr.docChanged)) return null;
-          const seenBlocks = new Set(), seenTasks = new Set(), tr = state.tr;
-          state.doc.descendants((node, pos) => {
-            if (node.type.name !== "taskItem") return;
+          const previousNodes = new Set(pluginKey.getState(old).records.map(record => record.node));
+          const records = pluginKey.getState(state).records;
+          const stable = records.filter(record => previousNodes.has(record.node));
+          const seenBlocks = new Set(stable.map(record => record.node.attrs.id));
+          const seenTasks = new Set(stable.map(record => record.node.attrs.trackedTask?.id).filter(Boolean)), tr = state.tr;
+          for (const { node, pos } of records) {
+            if (previousNodes.has(node)) continue;
             const attrs = { ...node.attrs };
             const blockID = typeof attrs.id === "string" ? attrs.id.trim() : "";
             // Formatting and Enter create checklist nodes without IDs. Repair the live
@@ -191,7 +209,7 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
             seenBlocks.add(attrs.id);
             if (attrs.trackedTask) seenTasks.add(attrs.trackedTask.id);
             if (attrs.id !== node.attrs.id || attrs.trackedTask !== task) tr.setNodeMarkup(pos, undefined, attrs);
-          });
+          }
           return tr.docChanged ? tr : null;
         },
         view(view) {
@@ -206,11 +224,20 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
             }
             const key = JSON.stringify(current);
             if (key !== previous) { previous = key; post("taskState", current || {}); }
-            if (old && !view.state.doc.eq(old.doc)) {
-              let hasTasks = false;
-              view.state.doc.descendants(node => { if (node.attrs.trackedTask) hasTasks = true; });
-              old.doc.descendants(node => { if (node.attrs.trackedTask) hasTasks = true; });
-              if (hasTasks) post("taskSnapshot", { document: canonicalize(view.state.doc.toJSON()) });
+            if (old && view.state.doc !== old.doc) {
+              const before = new Map(pluginKey.getState(old).records
+                .filter(({ node }) => node.attrs.trackedTask).map(({ node }) => [node.attrs.id, node]));
+              let taskChanged = false;
+              for (const { node } of pluginKey.getState(view.state).records) {
+                if (!node.attrs.trackedTask) continue;
+                const previous = before.get(node.attrs.id);
+                if (!previous || previous.attrs.checked !== node.attrs.checked || previous.attrs.crossed !== node.attrs.crossed ||
+                    (previous.attrs.trackedTask !== node.attrs.trackedTask &&
+                      JSON.stringify(previous.attrs.trackedTask) !== JSON.stringify(node.attrs.trackedTask))) taskChanged = true;
+                before.delete(node.attrs.id);
+              }
+              // Ordinary typing uses the debounced content channel, even in a task document.
+              if (taskChanged || before.size) taskSnapshot(view.state.doc, post, canonicalize);
             }
           };
           update(view);
@@ -245,7 +272,7 @@ export function taskCommand(editor, name, args, post, canonicalize) {
     }
     if (tr.docChanged) {
       editor.view.dispatch(tr.setMeta("addToHistory", false));
-      post("taskSnapshot", { document: canonicalize(editor.getJSON()) });
+      taskSnapshot(editor.state.doc, post, canonicalize);
     }
     return true;
   }
@@ -274,6 +301,6 @@ export function taskCommand(editor, name, args, post, canonicalize) {
   }
   editor.view.dispatch(closeHistory(editor.state.tr.setNodeMarkup(target.pos, undefined, attrs)));
   editor.view.dispatch(closeHistory(editor.state.tr));
-  post("taskSnapshot", { document: canonicalize(editor.getJSON()) });
+  taskSnapshot(editor.state.doc, post, canonicalize);
   return true;
 }

@@ -135,7 +135,7 @@ test("template callout guidance uses its projected marks for active formatting",
   guided.attrs.placeholderGuidance = [{ type: "text", text: "Guidance", marks: [{ type: "bold" }] }];
   const h = await runtime([{ type: "plainCallout", attrs: { id: "plain", color: "#7EEAC8" }, content: [guided] }]);
   try {
-    await h.command("setTemplateEditing", { enabled: true });
+    await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
     await h.command("setPlaceholderMode", { active: true });
     let position;
     h.editor.state.doc.descendants((node, pos) => { if (node.attrs.id === guided.attrs.id) position = pos + 1; });

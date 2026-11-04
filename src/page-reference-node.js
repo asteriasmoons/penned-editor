@@ -1,4 +1,5 @@
 import { Node, getRenderedAttributes, mergeAttributes } from "@tiptap/core";
+import { NodeSelection } from "@tiptap/pm/state";
 
 const pages = new Map();
 const subscribers = new Set();
@@ -21,12 +22,18 @@ export function setPageReferences(records) {
   for (const render of subscribers) render();
 }
 
-export function pageReferenceNode({ post, selectionActive }) {
+export function pageReferenceNode({ post, selectionActive, indent }) {
   return Node.create({
     name: "pageReference",
     group: "block",
     atom: true,
     selectable: true,
+    addKeyboardShortcuts() {
+      return {
+        Tab: () => this.editor.state.selection.node?.type.name === this.name && (indent?.(1) ?? false),
+        "Shift-Tab": () => this.editor.state.selection.node?.type.name === this.name && (indent?.(-1) ?? false),
+      };
+    },
     addAttributes() {
       return {
         documentID: {
@@ -41,7 +48,7 @@ export function pageReferenceNode({ post, selectionActive }) {
       return ["div", mergeAttributes(HTMLAttributes, { class: "vellix-page-reference" }), "Page"];
     },
     addNodeView() {
-      return ({ node, editor }) => {
+      return ({ node, editor, getPos }) => {
         let current = node;
         const dom = document.createElement("div");
         dom.className = "vellix-page-reference";
@@ -85,6 +92,8 @@ export function pageReferenceNode({ post, selectionActive }) {
         const render = () => {
           const record = pages.get(current.attrs.documentID);
           dom.hidden = Boolean(current.attrs.documentID) && !record;
+          dom.removeAttribute("data-vellix-indent");
+          dom.removeAttribute("data-vellix-align");
           for (const [key, value] of Object.entries(getRenderedAttributes(current, editor.extensionManager.attributes))) {
             dom.setAttribute(key, value);
           }
@@ -129,6 +138,8 @@ export function pageReferenceNode({ post, selectionActive }) {
           if (menuRequested || selectionActive() || !pages.has(current.attrs.documentID)) return;
           menuRequested = true;
           suppressClick = true;
+          const position = getPos();
+          if (typeof position === "number") editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, position)));
           editor.commands.blur();
           post("pageActionsRequest", { documentId: current.attrs.documentID });
         };

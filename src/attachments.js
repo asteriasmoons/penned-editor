@@ -1,4 +1,5 @@
-import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
 import { DOMSerializer, Fragment, Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
 import { audioPlayer } from "./audio-player.js";
@@ -23,6 +24,8 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
   const clipboardRequests = new Map();
   const views = new Set();
   const actionHosts = new Map();
+  const key = new PluginKey("pennedAttachments");
+  const isAttachment = node => node.type.name === "attachment";
   const capture = editor => {
     bookmark = editor.state.selection.getBookmark(); insertionToken = crypto.randomUUID(); return insertionToken;
   };
@@ -44,20 +47,26 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
   const integration = Extension.create({ name: "pennedAttachmentIntegration", addProseMirrorPlugins() {
     const editor = this.editor;
     return [new Plugin({
+      key,
       view(view) {
         const actions = attachmentActions({ root: view.dom, enabled: () => !selectionActive(),
           request: host => actionHosts.get(host)?.() });
         return { update(view, previous) { if (previous.doc !== view.state.doc || selectionActive()) actions.cancel(); }, destroy: () => actions.destroy() };
       },
-      state: { init: () => null, apply(tr, value) { if (bookmark) bookmark = bookmark.map(tr.mapping); return value; } },
+      state: { init: (_config, state) => createNodeIndex(state.doc, isAttachment), apply(tr, value) {
+        if (bookmark) bookmark = bookmark.map(tr.mapping);
+        return updateNodeIndex(value, tr, isAttachment);
+      } },
       appendTransaction(transactions, old, state) {
         if (!transactions.some(tr => tr.docChanged)) return null;
-        const seen = new Set(), tr = state.tr;
-        state.doc.descendants((node, pos) => {
-          if (node.type.name !== "attachment") return;
+        const before = new Set(key.getState(old).records.map(record => record.node));
+        const records = key.getState(state).records;
+        const seen = new Set(records.filter(record => before.has(record.node)).map(record => record.node.attrs.id)), tr = state.tr;
+        for (const { node, pos } of records) {
+          if (before.has(node)) continue;
           if (!node.attrs.id || seen.has(node.attrs.id)) tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: crypto.randomUUID() });
           seen.add(tr.doc.nodeAt(pos).attrs.id);
-        });
+        }
         return tr.docChanged ? tr : null;
       }, props: {
       transformPasted(slice) {

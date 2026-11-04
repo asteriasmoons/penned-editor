@@ -304,6 +304,30 @@
       }
 
 
+      .tiptap-editor .vellix-plain-callout {
+        --penned-callout-preview-width: initial; --penned-callout-width: initial;
+      }
+      .penned-callout-row {
+        display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px;
+        width: 100%; min-width: 0; --penned-callout-gap-share: 6px;
+      }
+      .penned-callout-row-content { display: contents; }
+      .tiptap-editor .penned-callout-row-content > *, .penned-callout-space {
+        flex: 1 0 120px; box-sizing: border-box; min-width: min(120px, 100%);
+        max-width: 100%; margin-block: 0 !important;
+      }
+      .tiptap-editor .penned-callout-row-content > .vellix-plain-callout {
+        flex: 0 0 calc(var(--penned-callout-preview-width, var(--penned-callout-width, 100%)) - var(--penned-callout-gap-share));
+        width: auto;
+      }
+      .tiptap-editor .vellix-plain-callout:is([data-callout-width], .penned-callout-resizing):not(.penned-callout-row-content > *) {
+        width: var(--penned-callout-preview-width, var(--penned-callout-width, 100%)); max-width: 100%;
+      }
+      .penned-callout-space { min-height: 44px; align-self: stretch; cursor: text; }
+      .penned-callout-space[hidden] { display: none; }
+      .tiptap-editor[contenteditable="false"] .penned-callout-resizers { display: none; }
+      .penned-callout-row .vellix-plain-callout-text { min-width: 0; overflow-wrap: anywhere; }
+
       .vellix-page-reference { min-width: 0; margin: 0; padding: 2px 0; }
       .tiptap-editor > .vellix-page-reference:first-child { padding-top: 0; }
       .vellix-page-reference-button {
@@ -842,6 +866,12 @@
         padding-left: 24px;
       }
 
+      .tiptap-editor ol > li > :is(h1, h2, h3, h4):first-child { margin-top: 0; }
+      .tiptap-editor ol > li:has(> h1:first-child)::marker { font-size: 24px; font-weight: 700; }
+      .tiptap-editor ol > li:has(> h2:first-child)::marker { font-size: 21px; font-weight: 700; }
+      .tiptap-editor ol > li:has(> h3:first-child)::marker { font-size: 18px; font-weight: 700; }
+      .tiptap-editor ol > li:has(> h4:first-child)::marker { font-size: 16px; font-weight: 700; }
+
       .tiptap-editor [data-type="taskList"] {
         margin: 4px 0;
         padding-left: 0;
@@ -1025,9 +1055,9 @@
 
       .tiptap-editor .vellix-divider-circle {
         display: block;
-        width: 10px;
-        height: 10px;
-        flex: 0 0 10px;
+        width: 4px;
+        height: 4px;
+        flex: 0 0 4px;
         border-radius: 50%;
         background: currentColor;
       }

@@ -8,11 +8,12 @@ import { Editor, Extension, Node, getRenderedAttributes, mergeAttributes } from 
 import { AllSelection, NodeSelection, Plugin, PluginKey, TextSelection, Selection, SelectionRange } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { DOMSerializer, Fragment, Slice } from "@tiptap/pm/model";
-import { Transform } from "@tiptap/pm/transform";
+import { canSplit, ReplaceStep, Transform } from "@tiptap/pm/transform";
 import { keydownHandler } from "@tiptap/pm/keymap";
-import { closeHistory } from "@tiptap/pm/history";
+import { closeHistory, isHistoryTransaction } from "@tiptap/pm/history";
 import { createTextColor, textColorDependencies } from "./text-color.js";
 import StarterKit from "@tiptap/starter-kit";
+import { ListItem } from "@tiptap/extension-list";
 import Blockquote from "@tiptap/extension-blockquote";
 import Code from "@tiptap/extension-code";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -25,6 +26,12 @@ import TaskList from "@tiptap/extension-task-list";
 import { PROPERTY_KINDS, normalizeProperty, propertyText } from "./inline-properties.js";
 import { inlinePropertyNode } from "./inline-property-node.js";
 import { createCaretTracking } from "./caret-tracking.js";
+import { createCalloutListBackspace } from "./callout-list-backspace.js";
+import { CaretSlots, activeColumnInsertion, beginCaretInsertion, blockGapAtPoint, clearUnusedCaretSlots,
+  documentWithoutUnusedCaretSlots, endCaretInsertion, placeCaretInSlot, resetCaretInsertions, restoreCaretInsertion,
+  trailingNumberedLine, separateTrailingNumberedLine, placeCaretOnTrailingNumberedLine } from "./caret-slots.js";
+import { calloutRow, CalloutRowCleanup, calloutWidthAttribute, resizableCalloutView } from "./resizable-callouts.js";
+import { calloutRowMetrics } from "./callout-layout.js";
 import { unwrapRetiredColumns } from "./retired-column-content.js";
 import { createChecklistItem, createTaskIntegration, taskCommand } from "./document-tasks.js";
 import { pageReferenceNode, setPageReferences, normalizePageReferenceStarters } from "./page-reference-node.js";
@@ -34,6 +41,7 @@ import { prepareDocumentPresentation } from "./presentation-ready.js";
 import { applyEditorAppearance } from "./appearance.js";
 import { createBlockActions } from "./block-actions.js";
 import { Caption } from "./caption.js";
+import { changedRanges, createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
 import "./structured-placeholders.js";
 import "./vendor/table-library.js";
 import "./table-formulas.js";
@@ -70,6 +78,25 @@ const vellixIconAssets = new Map();
 const selectionHighlightPluginKey = new PluginKey("vellixTextSelectionHighlight");
 const UnderlineableCode = Code.extend({
   excludes: "",
+});
+const PennedListItem = ListItem.extend({
+  content: "(paragraph | heading | caption) block*",
+  addKeyboardShortcuts() {
+    const shortcuts = this.parent?.() || {};
+    return { ...shortcuts, Enter: () => {
+      const { $from } = this.editor.state.selection;
+      if ($from.parent.type.name !== "heading" || !$from.parent.content.size ||
+          $from.depth < 2 || $from.node(-1).type.name !== this.name) return shortcuts.Enter?.() || false;
+      const level = $from.parent.attrs.level;
+      return this.editor.chain().splitListItem(this.name).command(({ tr }) => {
+        const next = tr.selection.$from;
+        if (!next.parent.isTextblock) return false;
+        tr.setNodeMarkup(next.before(), this.editor.schema.nodes.heading,
+          { ...next.parent.attrs, id: id(), level });
+        return true;
+      }).run();
+    } };
+  },
 });
 const SLASH_ITEMS = [
   { key: "collection", title: "Collection", detail: "Document Table and Gallery views", icon: "linedpages" },
@@ -724,13 +751,20 @@ function renderIconElement(iconElement, icon, color = DEFAULT_CALLOUT_COLOR, siz
   return { icon: normalizedIcon, src };
 }
 
+const renderedCalloutIcons = new WeakMap();
 function renderCalloutIcons(root = document) {
-  root.querySelectorAll?.(".vellix-callout").forEach((callout) => {
+  const callouts = root.matches?.(".vellix-callout")
+    ? [root, ...root.querySelectorAll(".vellix-callout")]
+    : root.querySelectorAll?.(".vellix-callout") ?? [];
+  callouts.forEach((callout) => {
     const icon = callout.dataset.calloutIcon || DEFAULT_CALLOUT_ICON;
     const color = callout.dataset.calloutColor || DEFAULT_CALLOUT_COLOR;
     const iconElement = callout.querySelector(".vellix-callout-icon-image");
     if (!iconElement) return;
     const src = iconSource(icon, color, 22);
+    const signature = `${icon}:${color}:${src}`;
+    if (renderedCalloutIcons.get(iconElement) === signature) return;
+    renderedCalloutIcons.set(iconElement, signature);
     traceCalloutImageState("callout-dom-icon-before-src", callout, iconElement, {
       nextSrc: src,
       previousSrc: iconElement.getAttribute("src") || iconElement.style.backgroundImage || null,
@@ -747,6 +781,39 @@ function renderCalloutIcons(root = document) {
     traceCalloutImageState("callout-dom-icon-mounted-state", callout, iconElement, { src });
     scheduleCalloutImageStateProbes(callout, iconElement, "mounted");
   });
+}
+
+
+// Ordinary text edits must not scan every callout in a large document.
+// Resolve only callouts intersecting the changed model ranges; full-document
+// replacement and icon-asset registration retain their explicit full refreshes.
+function renderChangedCalloutIcons(transaction) {
+  if (!transaction?.docChanged) return;
+  const ranges = changedRanges(transaction);
+  if (!ranges.length) { renderCalloutIcons(); return; }
+  const affected = new Set();
+  const view = editor.view;
+  const addCallout = (position) => {
+    const element = view.nodeDOM(position);
+    if (!(element instanceof HTMLElement)) return;
+    if (element.matches('.vellix-callout')) affected.add(element);
+    element.querySelectorAll?.('.vellix-callout').forEach(callout => affected.add(callout));
+    const ancestor = element.closest('.vellix-callout');
+    if (ancestor) affected.add(ancestor);
+  };
+  for (const range of ranges) {
+    const from = Math.max(0, range.from - 1);
+    const to = Math.min(transaction.doc.content.size, range.to + 1);
+    transaction.doc.nodesBetween(from, to, (node, position) => {
+      if (node.type.name === 'callout') addCallout(position);
+      return !node.isText;
+    });
+    const resolved = transaction.doc.resolve(Math.min(range.from, transaction.doc.content.size));
+    for (let depth = resolved.depth; depth > 0; depth--) {
+      if (resolved.node(depth).type.name === 'callout') addCallout(resolved.before(depth));
+    }
+  }
+  affected.forEach(callout => renderCalloutIcons(callout));
 }
 
 function applyAppearance(payload = {}) {
@@ -771,6 +838,7 @@ const BlockID = Extension.create({
           "taskItem",
           "callout",
           "plainCallout",
+          "plainCalloutRow",
           "templateComponent",
           "attachment",
           "divider",
@@ -1033,6 +1101,7 @@ const PlainCallout = Node.create({
   addAttributes() {
     return {
       id: { default: null },
+      widthPercent: calloutWidthAttribute,
       clipSource: {
         default: null,
         parseHTML: element => {
@@ -1051,6 +1120,9 @@ const PlainCallout = Node.create({
   parseHTML() {
     return [{ tag: "div[data-penned-clip-source]", contentElement: ".penned-clip-source-content" },
       { tag: "div[data-type='vellix-plain-callout']" }, { tag: "div.vellix-plain-callout" }];
+  },
+  addNodeView() {
+    return props => resizableCalloutView({ ...props, selectionActive: () => selectionMode !== "off" });
   },
   renderHTML({ HTMLAttributes, node }) {
     const color = node.attrs.color || DEFAULT_CALLOUT_COLOR;
@@ -1079,20 +1151,7 @@ const PlainCallout = Node.create({
           if (!editor.isEditable || selectionMode !== "off") return true;
           if ($from.depth !== depth + 1 || $from.parent.type.spec.code || !$from.sameParent($to)) return false;
 
-          const previous = $from.nodeBefore;
-          if (!selection.empty || $from.parentOffset !== $from.parent.content.size || previous?.type.name !== "hardBreak") {
-            return editor.commands.setHardBreak();
-          }
-
-          // A second Return removes the empty line and continues outside the box.
-          const after = $from.after(depth);
-          return editor.chain().focus().command(({ tr }) => {
-            tr.delete(selection.from - previous.nodeSize, selection.from);
-            const position = tr.mapping.map(after);
-            tr.insert(position, editor.schema.nodes.paragraph.create({ id: id() }));
-            tr.setSelection(TextSelection.create(tr.doc, position + 1));
-            return true;
-          }).run();
+          return editor.commands.setHardBreak();
         }
         return false;
       },
@@ -1434,6 +1493,7 @@ let selectionMode = "off";
 let selectionDecorationRefreshQueued = false;
 let lastSelectionHandleEvent = { key: "", time: 0 };
 let lastHeight = -1;
+let contentHeightFrame = null, lastContentHeightFrame = -1;
 let lastVisualContentBottom = -1;
 let lastSelectionCount = -1;
 let lastPageBreakSignature = "";
@@ -1454,6 +1514,10 @@ const editor = new Editor({
   element: document.getElementById("editor"),
   extensions: [
     textColor.mark, textColor.integration,
+    CaretSlots,
+    createCalloutListBackspace({ selectionActive: () => selectionMode !== "off" }),
+    CalloutRowCleanup,
+    calloutRow({ selectionActive: () => selectionMode !== "off" }),
     ...(window.PennedBlockSelection?.extensions({ Extension, Plugin, PluginKey, Decoration, DecorationSet,
       closeHistory, post: postToSwift, modeChanged: mode => { selectionMode = mode; } }) ?? []),
     ...window.VellixTables.createExtensions({ Node, Extension, Plugin, PluginKey, Decoration, DecorationSet, TextSelection,
@@ -1461,7 +1525,8 @@ const editor = new Editor({
       modules: { "prosemirror-state": { Plugin, PluginKey, TextSelection, NodeSelection, Selection, SelectionRange },
         "prosemirror-model": { Fragment, Slice, DOMSerializer }, "prosemirror-view": { Decoration, DecorationSet },
         "prosemirror-transform": { Transform }, "prosemirror-keymap": { keydownHandler } } }),
-    window.VellixStructuredPlaceholders.createExtension({ Extension, Plugin, PluginKey, Decoration, DecorationSet, TextSelection, DOMSerializer }),
+    window.VellixStructuredPlaceholders.createExtension({ Extension, Plugin, PluginKey, Decoration, DecorationSet,
+      TextSelection, NodeSelection, DOMSerializer, ReplaceStep, isHistoryTransaction }),
     VellixDocument,
     Caption,
     templateComponents.node,
@@ -1470,12 +1535,14 @@ const editor = new Editor({
     documentTags.node,
     documentTags.integration,
     StarterKit.configure({
+      listItem: false,
       blockquote: false,
       code: false,
       document: false,
       horizontalRule: false,
       trailingNode: false,
     }),
+    PennedListItem,
     UnderlineableCode,
     TaskList,
     VellixTaskItem,
@@ -1495,7 +1562,7 @@ const editor = new Editor({
       selectionActive: () => selectionMode !== "off",
       reportHeight: reportContentHeight,
     }),
-    pageReferenceNode({ post: postToSwift, selectionActive: () => selectionMode !== "off" }),
+    pageReferenceNode({ post: postToSwift, selectionActive: () => selectionMode !== "off", indent: direction => movePageReferences(direction) }),
     collectionNode({ post: postToSwift, selectionActive: () => selectionMode !== "off", reportHeight: reportContentHeight }),
   ],
   content: normalizeTipTapDocument(null),
@@ -1506,8 +1573,9 @@ const editor = new Editor({
       spellcheck: "false",
     },
   },
-  onUpdate: ({ editor }) => {
-    renderCalloutIcons();
+  onUpdate: ({ editor, transaction }) => {
+    updateMeasuredFeatures(transaction);
+    renderChangedCalloutIcons(transaction);
     if (window.PENNED_EDITOR_DIAGNOSTICS === true) traceCalloutAttrs("onUpdate-after-transaction", editor.getJSON());
     scheduleUpdate(editor);
     reportContentHeight();
@@ -1521,7 +1589,7 @@ const editor = new Editor({
     });
   },
   onFocus: () => postToSwift("focus", { focused: true }),
-  onBlur: () => postToSwift("focus", { focused: false }),
+  onBlur: () => { clearUnusedCaretSlots(editor); postToSwift("focus", { focused: false }); },
 });
 
 const caretTracking = createCaretTracking({ editor, post: postToSwift, reportHeight: reportContentHeight,
@@ -1612,12 +1680,19 @@ if (editorElement && window.PENNED_EDITOR_DIAGNOSTICS === true) {
   });
 }
 
+// ProseMirror documents are immutable: selection/formatting transactions can
+// reuse a snapshot without serializing and normalizing every block again.
+let snapshotDocument = null;
+let cachedSnapshot = null;
 function snapshotPayload() {
-  const documentJSON = normalizeTipTapDocument(editor.getJSON());
-  return {
-    document: documentJSON,
-    ...statistics(documentJSON),
-  };
+  const currentDocument = editor.state.doc;
+  if (snapshotDocument === currentDocument && cachedSnapshot) return cachedSnapshot;
+  const documentJSON = normalizeTipTapDocument(documentWithoutUnusedCaretSlots(editor.state).toJSON());
+  // Word/character counts are recomputed natively during save (TipTapContentAnalyzer)
+  // and are ignored on "update"/"snapshot" messages.
+  snapshotDocument = currentDocument;
+  cachedSnapshot = { document: documentJSON };
+  return cachedSnapshot;
 }
 
 function scheduleUpdate() {
@@ -1727,6 +1802,8 @@ function listRowType(type) {
 }
 
 function shouldSelectModelNode(type, parentType) {
+  if (type === "plainCalloutRow") return false;
+  if (["plainCalloutRow", "plainCallout"].includes(parentType) && !listContainerType(type)) return true;
   if (listRowType(type) && listContainerType(parentType)) return true;
   if (parentType === "doc" && !listContainerType(type)) return true;
   return false;
@@ -1796,7 +1873,7 @@ function topLevelModelBlocks(rootDoc = editor.state.doc) {
         });
       }
 
-      if (listContainerType(type)) {
+      if (listContainerType(type) || ["plainCalloutRow", "plainCallout"].includes(type)) {
         visitChildren(node, pos, path);
       }
     });
@@ -2261,15 +2338,16 @@ function clearProseMirrorNodeSelectionForSelectionExit() {
 }
 
 function reportedVisualContentBottom(root, content) {
-  const renderedBlocks = [];
-  editor.state.doc.forEach((node, offset) => {
+  let visualElement = null, offset = editor.state.doc.content.size;
+  for (let index = editor.state.doc.childCount - 1; index >= 0; index--) {
+    const node = editor.state.doc.child(index);
+    offset -= node.nodeSize;
     const element = editor.view.nodeDOM(offset);
     if (element instanceof HTMLElement && isVisibleElement(element)) {
-      renderedBlocks.push({ node, element });
+      visualElement = element;
+      break;
     }
-  });
-
-  const visualElement = renderedBlocks[renderedBlocks.length - 1]?.element;
+  }
   if (!(visualElement instanceof HTMLElement)) {
     return Math.max(0, Math.ceil(content.getBoundingClientRect().bottom - root.getBoundingClientRect().top));
   }
@@ -2287,7 +2365,38 @@ function reportedVisualContentBottom(root, content) {
   );
 }
 
-function reportContentHeight() {
+function reportContentHeight(timestamp) {
+  if (typeof timestamp !== "number") {
+    if (contentHeightFrame === null) contentHeightFrame = requestAnimationFrame(reportContentHeight);
+    return;
+  }
+  if (contentHeightFrame !== null) cancelAnimationFrame(contentHeightFrame);
+  contentHeightFrame = null;
+  if (lastContentHeightFrame === timestamp) return;
+  lastContentHeightFrame = timestamp;
+  measureContentHeight();
+}
+
+// Track only feature nodes, rather than walking every paragraph each time
+// the document changes. The index maps unchanged nodes through transactions.
+const isMeasuredFeature = node => node.type.name === "pageBreak" || node.type.name === "collection";
+let measuredFeatureIndex = null;
+function documentFeaturePresence() {
+  const doc = editor.state.doc;
+  if (!measuredFeatureIndex || measuredFeatureIndex.doc !== doc) {
+    measuredFeatureIndex = createNodeIndex(doc, isMeasuredFeature);
+  }
+  return {
+    pageBreaks: measuredFeatureIndex.records.some(record => record.node.type.name === "pageBreak"),
+    collections: measuredFeatureIndex.records.some(record => record.node.type.name === "collection"),
+  };
+}
+function updateMeasuredFeatures(transaction) {
+  if (!transaction.docChanged) return;
+  measuredFeatureIndex = updateNodeIndex(measuredFeatureIndex, transaction, isMeasuredFeature);
+}
+
+function measureContentHeight() {
   const root = document.querySelector(".vellix-editor-page");
   const content = editor?.view?.dom;
 
@@ -2311,8 +2420,15 @@ function reportContentHeight() {
     postToSwift("height", { height, visualContentBottom });
   }
 
-  reportPageBreakRegions(root);
-  const regions = nativeCollectionRegions(root);
+  const features = documentFeaturePresence();
+  if (features.pageBreaks || lastPageBreakSignature !== JSON.stringify([])) {
+    if (features.pageBreaks) reportPageBreakRegions(root, content);
+    else {
+      lastPageBreakSignature = JSON.stringify([]);
+      postToSwift("pageBreaks", { regions: [] });
+    }
+  }
+  const regions = features.collections ? nativeCollectionRegions(root) : [];
   const signature = JSON.stringify(regions);
   if (signature !== lastNativeCollectionSignature) {
     lastNativeCollectionSignature = signature;
@@ -2320,12 +2436,20 @@ function reportContentHeight() {
   }
 }
 
-function reportPageBreakRegions(root) {
+function reportPageBreakRegions(root, content) {
   if (!root) return;
   const rootRect = root.getBoundingClientRect();
-  const regions = Array.from(
-    root.querySelectorAll("[data-vellix-page-break], [data-type='pageBreak'], [data-page-break]"),
-  )
+  const selector = "[data-vellix-page-break], [data-type='pageBreak'], [data-page-break]";
+  // Page breaks are schema-restricted to the top level (doc content is
+  // "(block | pageBoundary)+"; nested containers accept only "block+"), so they are
+  // always direct children of the editor DOM. Scanning those children instead of a
+  // whole-document attribute-selector query keeps this per-frame measure O(top-level
+  // blocks) rather than O(all elements). Fall back to a full query if the editor DOM
+  // is unavailable, so a page break can never be missed.
+  const candidates = content instanceof HTMLElement
+    ? Array.from(content.children).filter((element) => element.matches?.(selector))
+    : Array.from(root.querySelectorAll(selector));
+  const regions = candidates
     .filter((element) => {
       const style = window.getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
@@ -2396,10 +2520,13 @@ function walkTransform(nodes, transform) {
   });
 }
 
-function commitDocument(nextDocument) {
+function commitDocument(nextDocument, deletionRanges = null) {
   const normalizedDocument = normalizeTipTapDocument(nextDocument);
   traceCalloutAttrs("commitDocument-before-setContent", normalizedDocument);
-  editor.commands.setContent(normalizedDocument, { emitUpdate: false });
+  if (deletionRanges) {
+    editor.chain().command(({ tr }) => { tr.setMeta("pennedPlaceholderDeletion", deletionRanges); return true; })
+      .setContent(normalizedDocument, { emitUpdate: false }).run();
+  } else editor.commands.setContent(normalizedDocument, { emitUpdate: false });
   traceCalloutAttrs("commitDocument-after-setContent", editor.getJSON());
   renderCalloutIcons();
   setSelectionClasses();
@@ -2410,6 +2537,10 @@ function commitDocument(nextDocument) {
 function transformNodeToBlock(node, type, payload = {}) {
   const blockID = nodeId(node);
   const content = taggedInlineContent(node) ?? inlineContent(plainText(node));
+  if (node.type === "listItem" && type === "heading") {
+    const [first, ...rest] = node.content || [];
+    return { ...node, content: [transformNodeToBlock(first || paragraph(), type, payload), ...rest] };
+  }
   switch (type) {
     case "caption":
       return { type: "caption", attrs: { id: blockID }, content };
@@ -2459,8 +2590,10 @@ function transformNodeToBlock(node, type, payload = {}) {
     case "numberedListItem":
       return {
         type: "orderedList",
-        attrs: { id: blockID },
-        content: [{ type: "listItem", attrs: { id: id() }, content: [paragraph(content)] }],
+        attrs: { id: id() },
+        content: [{ type: "listItem", attrs: { id: id() }, content: [
+          node.type === "heading" ? node : paragraph(content, { id: blockID }),
+        ] }],
       };
     case "toggleListItem":
       return { type: "toggleItem", attrs: { id: blockID, open: true }, content: [
@@ -2474,7 +2607,89 @@ function transformNodeToBlock(node, type, payload = {}) {
 }
 
 function transformSelectedBlocks(type, payload = {}) {
+  if (type === "numberedListItem") {
+    const blocks = topLevelModelBlocks().filter(block => selection.has(block.key));
+    if (blocks.length && blocks.every(block => block.node.isTextblock || block.node.type.name === "listItem")) {
+      const tr = closeHistory(editor.state.tr);
+      for (const block of blocks.slice().reverse()) {
+        const from = tr.mapping.map(block.pos + (block.node.isTextblock ? 1 : 2), 1);
+        const to = tr.mapping.map(block.pos + block.node.nodeSize - (block.node.isTextblock ? 1 : 2), -1);
+        const resolved = tr.doc.resolve(from);
+        let numbered = false;
+        for (let depth = resolved.depth; depth > 0; depth--) if (resolved.node(depth).type.name === "orderedList") numbered = true;
+        if (numbered) continue;
+        if (!editor.commandManager.createChain(tr).setTextSelection({ from, to }).toggleOrderedList().run()) return false;
+      }
+      if (tr.docChanged) editor.view.dispatch(tr);
+      return true;
+    }
+  }
   transformSelectedTopLevelBlocks((node) => transformNodeToBlock(node, type, payload));
+}
+
+function dividerConversionSelection(doc, blocks) {
+  const protectedDepth = position => {
+    for (let depth = 1; depth <= position.depth; depth++) {
+      if (editor.storage?.vellixStructuredPlaceholders?.isProtected?.(position.node(depth))) return depth;
+    }
+    return 0;
+  };
+  const current = editor.state.selection;
+  if (current instanceof TextSelection && current.empty && !protectedDepth(current.$from)) return current;
+  const findText = (position, direction) => {
+    let candidate = Selection.findFrom(doc.resolve(position), direction, true);
+    while (candidate) {
+      const depth = protectedDepth(candidate.$from);
+      if (!depth) return candidate;
+      const next = direction > 0 ? candidate.$from.after(depth) : candidate.$from.before(depth);
+      candidate = Selection.findFrom(doc.resolve(next), direction, true);
+    }
+    return null;
+  };
+  const first = blocks.reduce((position, block) => Math.min(position, block.pos), doc.content.size);
+  const last = blocks.reduce((a, b) => a.pos > b.pos ? a : b);
+  return findText(last.pos + last.node.nodeSize, 1) || findText(first, -1) || NodeSelection.create(doc, last.pos);
+}
+
+function clearEditorNativeRange() {
+  const native = window.getSelection();
+  if (native && (editor.view.dom.contains(native.anchorNode) || editor.view.dom.contains(native.focusNode))) native.removeAllRanges();
+}
+
+function convertSelectedDividers(style) {
+  if (selectionMode === "off" || editor.view.composing || !Object.prototype.hasOwnProperty.call(DIVIDER_STYLES, style)) return false;
+  // Blur may flush an unused caret slot, so read positions only afterward.
+  editor.view.dom.blur();
+  const blocks = window.PennedBlockSelection?.selectedRecords?.() ||
+    topLevelModelBlocks().filter(block => selection.has(block.key));
+  const dividers = blocks.filter(block => ["divider", "horizontalRule"].includes(block.node.type.name));
+  if (!dividers.length) return false;
+  const tr = closeHistory(editor.state.tr);
+  for (const block of dividers) {
+    if (block.node.type.name === "divider" && block.node.attrs.style === style) continue;
+    const parent = tr.doc.resolve(block.pos);
+    if (!parent.parent.canReplaceWith(parent.index(), parent.index() + 1, editor.schema.nodes.divider, block.node.marks)) return false;
+    tr.setNodeMarkup(block.pos, editor.schema.nodes.divider, { ...block.node.attrs, id: block.node.attrs.id || id(), style });
+  }
+  const changed = tr.docChanged;
+  const caret = dividerConversionSelection(editor.state.doc, dividers);
+  // Block conversion must not retain a text/node selection from a neighboring
+  // callout. Establish the history bookmark before the attribute edit as well.
+  if (!editor.state.selection.eq(caret)) {
+    editor.view.dispatch(editor.state.tr.setSelection(caret).setMeta("addToHistory", false));
+  }
+  tr.setSelection(caret instanceof NodeSelection
+    ? NodeSelection.create(tr.doc, tr.mapping.map(caret.from, -1))
+    : caret.map(tr.doc, tr.mapping));
+  tr.setMeta("pennedDividerStyleConversion", true);
+  editor.view.dispatch(tr);
+  clearEditorNativeRange();
+  if (changed) {
+    editor.view.dispatch(closeHistory(editor.state.tr));
+    setSelectionClasses();
+    postToSwift("snapshot", snapshotPayload());
+  }
+  return true;
 }
 
 function updateSelectedCalloutColor(color) {
@@ -2493,17 +2708,14 @@ function updateCalloutIcon(blockId, icon) {
     postToSwift("error", { message: "Select at least one block first." });
     return;
   }
-  const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  const updateNodes = (nodes, parentPath = []) => nodes.map((node, index) => {
-    const path = [...parentPath, index];
-    const isTarget = blockId ? nodeId(node) === blockId : selectedByPath.has(pathKey(path));
-    const nodeWithChildren = node.content ? { ...node, content: updateNodes(node.content, path) } : node;
-    return isTarget && node.type === "callout"
-      ? { ...nodeWithChildren, attrs: { ...nodeWithChildren.attrs, icon: icon || DEFAULT_CALLOUT_ICON } }
-      : nodeWithChildren;
+  const targets = new Set([...selectedByPath.values()].map(block => block.node?.attrs?.id || block.json?.attrs?.id));
+  const tr = editor.state.tr;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "callout" && (blockId ? node.attrs.id === blockId : targets.has(node.attrs.id))) {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, icon: icon || DEFAULT_CALLOUT_ICON });
+    }
   });
-  nextDocument.content = updateNodes(nextDocument.content);
-  commitDocument(nextDocument);
+  if (tr.docChanged) editor.view.dispatch(tr);
 }
 
 function updateCalloutColor(blockId, color) {
@@ -2511,15 +2723,13 @@ function updateCalloutColor(blockId, color) {
     postToSwift("error", { message: "Choose a callout before changing its color." });
     return;
   }
-  const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  const updateNodes = (nodes) => nodes.map((node) => {
-    const nodeWithChildren = node.content ? { ...node, content: updateNodes(node.content) } : node;
-    return nodeId(node) === blockId && (node.type === "callout" || node.type === "plainCallout")
-      ? { ...nodeWithChildren, attrs: { ...nodeWithChildren.attrs, color: color || DEFAULT_CALLOUT_COLOR } }
-      : nodeWithChildren;
+  const tr = editor.state.tr;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.attrs.id === blockId && ["callout", "plainCallout"].includes(node.type.name)) {
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, color: color || DEFAULT_CALLOUT_COLOR });
+    }
   });
-  nextDocument.content = updateNodes(nextDocument.content);
-  commitDocument(nextDocument);
+  if (tr.docChanged) editor.view.dispatch(tr);
 }
 
 function updateBlockquoteColor(blockId, color) {
@@ -2568,6 +2778,7 @@ function setMarkOnNode(node, markType, enabled) {
 }
 
 function formatSelectedBlocks(action, value = null) {
+  if (["indent", "outdent"].includes(action) && movePageReferences(action === "indent" ? 1 : -1)) return true;
   transformSelectedTopLevelBlocks((node) => {
     switch (action) {
       case "codeUnderline":
@@ -2615,10 +2826,12 @@ function currentSelectionTextblocks() {
   };
 
   includeSelectionAncestors(state.selection.$from);
-  includeSelectionAncestors(state.selection.$to);
-  state.doc.nodesBetween(state.selection.from, state.selection.to, (node, position) => {
-    includeNode(node, position);
-  });
+  if (!state.selection.empty) {
+    includeSelectionAncestors(state.selection.$to);
+    state.doc.nodesBetween(state.selection.from, state.selection.to, (node, position) => {
+      includeNode(node, position);
+    });
+  }
 
   return positions;
 }
@@ -2637,9 +2850,12 @@ function reportFormattingState(force = false) {
     strike: available && editor.isActive("strike"),
     code: available && editor.isActive("code"),
     alignment: alignments.size === 1 ? [...alignments][0] : null,
-    checklist: available && editor.isActive("taskList"),
-    bulletList: available && editor.isActive("bulletList"),
-    numberList: available && editor.isActive("orderedList"),
+    checklist: available && editor.isActive("taskList") &&
+      !(editor.state.selection.empty && trailingNumberedLine(editor.state)),
+    bulletList: available && editor.isActive("bulletList") &&
+      !(editor.state.selection.empty && trailingNumberedLine(editor.state)),
+    numberList: available && editor.isActive("orderedList") && !emptyNumberedContinuation(editor.state) &&
+      !(editor.state.selection.empty && trailingNumberedLine(editor.state)),
   };
   const signature = JSON.stringify(state);
   if (!force && signature === lastFormattingStateSignature) return;
@@ -2728,8 +2944,66 @@ function toggleMarkForCurrentSelection(markName) {
   return true;
 }
 
+function movePageReferences(direction, documentID = null) {
+  if (editor.options.editable === false) return false;
+  const state = editor.state;
+  let targets = [];
+  if (selectionMode !== "off" && !documentID) {
+    const selected = topLevelModelBlocks().filter(block => selection.has(block.key));
+    if (!selected.length || selected.some(block => block.type !== "pageReference")) return false;
+    targets = selected;
+  } else if (state.selection.node?.type.name === "pageReference" &&
+      (!documentID || state.selection.node.attrs.documentID === documentID)) {
+    targets = [{ node: state.selection.node, pos: state.selection.from }];
+  } else if (documentID) {
+    state.doc.descendants((node, pos) => {
+      if (!targets.length && node.type.name === "pageReference" && node.attrs.documentID === documentID) targets.push({ node, pos });
+    });
+  }
+  if (!targets.length) return false;
+  const tr = closeHistory(state.tr);
+  let selectedPosition = null;
+  for (const target of targets.slice().sort((a, b) => direction > 0 ? a.pos - b.pos : b.pos - a.pos)) {
+    const pos = tr.mapping.map(target.pos, 1), node = tr.doc.nodeAt(pos);
+    if (node?.type.name !== "pageReference" || node.attrs.id !== target.node.attrs.id) continue;
+    const resolved = tr.doc.resolve(pos), parent = resolved.parent, index = resolved.index();
+    const previous = index > 0 ? parent.child(index - 1) : null;
+    if (direction > 0 && previous?.type.name === "toggleItem" &&
+        previous.canReplace(previous.childCount, previous.childCount, Fragment.from(node))) {
+      const previousPosition = pos - previous.nodeSize;
+      const destination = pos - 1;
+      if (previous.attrs.open === false) tr.setNodeMarkup(previousPosition, undefined, { ...previous.attrs, open: true });
+      tr.delete(pos, pos + node.nodeSize).insert(destination, node);
+      selectedPosition = destination;
+    } else if (direction < 0 && parent.type.name === "toggleItem" && index > 0 && resolved.depth > 0) {
+      const outer = resolved.node(resolved.depth - 1), outerIndex = resolved.index(resolved.depth - 1) + 1;
+      if (!outer.canReplace(outerIndex, outerIndex, Fragment.from(node))) continue;
+      const end = resolved.after();
+      tr.delete(pos, pos + node.nodeSize);
+      const destination = tr.mapping.maps[tr.mapping.maps.length - 1].map(end, -1);
+      tr.insert(destination, node);
+      selectedPosition = destination;
+    } else {
+      const indent = Math.max(0, Math.min(6, Number(node.attrs.indent) || 0));
+      const next = Math.max(0, Math.min(6, indent + direction));
+      if (next !== indent) tr.setNodeMarkup(pos, undefined, { ...node.attrs, indent: next });
+      selectedPosition = pos;
+    }
+  }
+  if (!tr.docChanged) return false;
+  if (selectionMode === "off" && selectedPosition !== null) tr.setSelection(NodeSelection.create(tr.doc, selectedPosition));
+  editor.view.dispatch(tr.scrollIntoView());
+  editor.view.dispatch(closeHistory(editor.state.tr));
+  return true;
+}
+
 function currentStructuralBlockContext() {
   const { $from } = editor.state.selection;
+  const selected = editor.state.selection.node;
+  if (selected?.type.name === "pageReference") {
+    return { $from, parentDepth: $from.depth, parent: $from.parent, node: selected,
+      index: $from.index(), position: $from.pos };
+  }
 
   for (let depth = $from.depth; depth > 0; depth -= 1) {
     const parentDepth = depth - 1;
@@ -2755,6 +3029,10 @@ function currentStructuralBlockContext() {
 }
 
 function restoreSelectionAfterBlockMove(transaction, oldPosition, newPosition) {
+  if (editor.state.selection instanceof NodeSelection) {
+    transaction.setSelection(NodeSelection.create(transaction.doc, newPosition));
+    return;
+  }
   const { anchor, head } = editor.state.selection;
   const documentEnd = transaction.doc.content.size;
   const mappedAnchor = Math.max(
@@ -2841,8 +3119,34 @@ function outdentCurrentBlockFromToggle() {
   return true;
 }
 
+function emptyNumberedContinuation(state) {
+  const { empty, $from } = state.selection;
+  if (!empty || $from.depth < 3 || $from.parent.type.name !== "paragraph" || $from.parent.content.size ||
+      $from.node(-1).type.name !== "listItem" || $from.node(-2).type.name !== "orderedList" ||
+      $from.index(-1) === 0) return null;
+  return { position: $from.before(), item: $from.node(-1) };
+}
+
+function numberEmptyContinuation() {
+  const { state, view } = editor;
+  const target = emptyNumberedContinuation(state);
+  if (!target) return false;
+  const typesAfter = [{ type: target.item.type, attrs: { ...target.item.attrs, id: id() } }];
+  if (!canSplit(state.doc, target.position, 1, typesAfter)) return false;
+  // Repair an existing unnumbered continuation without toggling the whole item
+  // out of its list. The paragraph and its caret become the next numbered item.
+  const tr = state.tr.split(target.position, 1, typesAfter);
+  tr.setSelection(TextSelection.create(tr.doc, tr.mapping.map(state.selection.from, 1)));
+  view.dispatch(tr.scrollIntoView());
+  view.focus();
+  return true;
+}
+
 function formatCurrentSelection(action, value = null) {
   if (selectionMode !== "off" || !editor.isEditable) return false;
+  if (["indent", "outdent"].includes(action) && editor.state.selection.node?.type.name === "pageReference") {
+    return movePageReferences(action === "indent" ? 1 : -1);
+  }
 
   switch (action) {
     case "bold":
@@ -2870,10 +3174,23 @@ function formatCurrentSelection(action, value = null) {
         Math.max(0, (Number(node.attrs?.indent) || 0) - 1));
     }
     case "checkList":
+      if (editor.state.selection.empty && trailingNumberedLine(editor.state) &&
+          !editor.storage?.vellixStructuredPlaceholders?.isProtected?.(editor.state.selection.$from.parent)) {
+        return editor.chain().command(({ tr }) => separateTrailingNumberedLine(tr)).toggleTaskList().focus().run();
+      }
       return editor.chain().focus().toggleTaskList().run();
     case "bulletList":
+      if (editor.state.selection.empty && trailingNumberedLine(editor.state) &&
+          !editor.storage?.vellixStructuredPlaceholders?.isProtected?.(editor.state.selection.$from.parent)) {
+        return editor.chain().command(({ tr }) => separateTrailingNumberedLine(tr)).toggleBulletList().focus().run();
+      }
       return editor.chain().focus().toggleBulletList().run();
     case "numberList":
+      if (editor.state.selection.empty && trailingNumberedLine(editor.state) &&
+          !editor.storage?.vellixStructuredPlaceholders?.isProtected?.(editor.state.selection.$from.parent)) {
+        return editor.chain().command(({ tr }) => separateTrailingNumberedLine(tr)).toggleOrderedList().focus().run();
+      }
+      if (numberEmptyContinuation()) return true;
       return editor.chain().focus().toggleOrderedList().run();
     default:
       return false;
@@ -2898,9 +3215,10 @@ function deleteSelected() {
   });
   nextDocument.content = deleteNodes(nextDocument.content);
   const fileOperation = containsAttachments([...selectedByPath.values()].map(block => block.json));
+  const deletionRanges = [...selectedByPath.values()].map(block => ({ from: block.pos, to: block.pos + block.node.nodeSize }));
   if (fileOperation) editor.view.dispatch(closeHistory(editor.state.tr));
   selection.clear();
-  commitDocument(nextDocument.content.length ? nextDocument : normalizeTipTapDocument(null));
+  commitDocument(nextDocument.content.length ? nextDocument : normalizeTipTapDocument(null), deletionRanges);
   if (fileOperation) { editor.view.dispatch(closeHistory(editor.state.tr)); postToSwift("snapshot", snapshotPayload()); }
 }
 
@@ -2955,9 +3273,7 @@ function requestSubpage() {
 }
 
 function insertNode(node) {
-  const nextDocument = normalizeTipTapDocument(editor.getJSON());
-  nextDocument.content.push(normalizeTipTapNode(node));
-  commitDocument(nextDocument);
+  editor.commands.insertContentAt(editor.state.doc.content.size, normalizeTipTapNode(node));
 }
 
 function blockNodeForKey(key) {
@@ -3063,7 +3379,16 @@ function blockNodeForKey(key) {
   }
 }
 
-function insertBlockByKey(key, range = null, color = null) {
+function insertBlockByKey(key, range = null, color = null, insertionToken = null) {
+  if (!editor.isEditable || selectionMode !== "off") return false;
+  if (insertionToken && !restoreCaretInsertion(editor, insertionToken)) return false;
+  const column = key === "plainCallout" ? activeColumnInsertion(editor.state) : null;
+  const location = editor.state.selection.$from;
+  if (!column && location.parent.type.name === "paragraph" && location.depth > 1 &&
+      location.node(-1).type.name === "plainCalloutRow") {
+    if (!placeCaretInSlot(editor, location.after(location.depth - 1))) return false;
+    range = null;
+  }
   if (key === "collection") {
     if (!editor.isEditable || selectionMode !== "off") return false;
     const blockID = id();
@@ -3097,14 +3422,28 @@ function insertBlockByKey(key, range = null, color = null) {
   }
 
   const node = normalizeTipTapNode(blockNodeForKey(key));
+  if (column) {
+    const siblings = column.row.content.content.filter(child => child !== column.node);
+    const remaining = calloutRowMetrics(siblings).remaining;
+    if (!siblings.length || remaining <= 1) return false;
+    node.attrs.widthPercent = remaining;
+  }
   if (key === "plainCallout" && typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)) {
     node.attrs.color = color;
   }
   const selectedProperty = editor.state.selection instanceof NodeSelection &&
     editor.state.selection.node.type.name === "inlineProperty";
+  if (column && !column.node.content.size) {
+    // The caret paragraph is UI state, not part of the undoable insertion.
+    // Undo must restore the spare column, not resurrect an untracked row cell.
+    editor.view.dispatch(closeHistory(editor.state.tr.delete(column.position, column.position + column.node.nodeSize))
+      .setMeta("addToHistory", false));
+  }
   const insertion = editor.chain();
   if (node.type !== "inlineProperty") insertion.focus();
-  const command = range
+  const command = column && !column.node.content.size
+    ? insertion.insertContentAt(column.position, node)
+    : range
     ? insertion.deleteRange(range).insertContent(node)
     : selectedProperty ? insertion.insertContentAt(editor.state.selection.to, node)
     : insertion.insertContent(node);
@@ -3192,10 +3531,10 @@ function filteredSlashItems(query) {
 }
 
 function hideSlashMenu() {
+  const wasVisible = slashMenuVisible || slashState !== null;
   slashState = null;
   slashMenuVisible = false;
-  postToSwift("slashMenu", { visible: false });
-  requestAnimationFrame(reportContentHeight);
+  if (wasVisible) postToSwift("slashMenu", { visible: false });
 }
 
 function renderSlashMenu() {
@@ -3279,89 +3618,8 @@ function topLevelInsertionPositionAtY(clientY) {
   return insertionPosition;
 }
 
-function paragraphTextBounds(element) {
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  const rectangles = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-  if (!rectangles.length) return element.getBoundingClientRect();
-  return {
-    top: Math.min(...rectangles.map((rect) => rect.top)),
-    bottom: Math.max(...rectangles.map((rect) => rect.bottom)),
-  };
-}
-
-function paragraphGapInsertionPositionAtPoint(target, clientX, clientY) {
-  const content = editor.view.dom;
-  if (!content.contains(target)) return null;
-  if (target.closest("button, a, input, textarea, select, [contenteditable='false'], table, .vellix-table-wrapper")) return null;
-
-  const closestParagraph = target.closest("p");
-  const paragraphs = closestParagraph ? [closestParagraph] : Array.from(target.children).filter((element) => element.tagName === "P");
-  for (const paragraphElement of paragraphs) {
-    const start = editor.view.posAtDOM(paragraphElement, 0);
-    const resolved = editor.state.doc.resolve(start);
-    if (resolved.parent.type.name !== "paragraph" || resolved.depth < 1) continue;
-    const parent = resolved.node(resolved.depth - 1);
-    const index = resolved.index(resolved.depth - 1);
-    const paragraphPosition = resolved.before();
-
-    // Check only sibling paragraph boundaries, including paragraphs inside editable containers.
-    for (const leftIndex of [index - 1, index]) {
-      if (leftIndex < 0 || leftIndex + 1 >= parent.childCount) continue;
-      const left = parent.child(leftIndex);
-      const right = parent.child(leftIndex + 1);
-      if (left.type.name !== "paragraph" || right.type.name !== "paragraph") continue;
-      const leftPosition = leftIndex === index ? paragraphPosition : paragraphPosition - left.nodeSize;
-      const rightPosition = leftPosition + left.nodeSize;
-      const leftElement = editor.view.nodeDOM(leftPosition);
-      const rightElement = editor.view.nodeDOM(rightPosition);
-      if (!(leftElement instanceof HTMLElement) || !(rightElement instanceof HTMLElement)) continue;
-      const leftRect = leftElement.getBoundingClientRect();
-      const rightRect = rightElement.getBoundingClientRect();
-      if (leftRect.height <= 0 || rightRect.height <= 0) continue;
-      if (clientX < Math.max(leftRect.left, rightRect.left) || clientX > Math.min(leftRect.right, rightRect.right)) continue;
-      const gapStart = paragraphTextBounds(leftElement).bottom;
-      const gapEnd = paragraphTextBounds(rightElement).top;
-      if (clientY >= gapStart && clientY < gapEnd) return rightPosition;
-    }
-  }
-  return null;
-}
-
 function placeCaretInParagraphAt(position) {
-  editor.view.focus();
-
-  const state = editor.view.state;
-  const insertionPosition = Math.max(0, Math.min(position, state.doc.content.size));
-  const resolved = state.doc.resolve(insertionPosition);
-  const paragraphType = state.schema.nodes.paragraph;
-  if (!paragraphType || !resolved.parent.canReplaceWith(resolved.index(), resolved.index(), paragraphType)) return false;
-
-  if (resolved.nodeAfter?.type === paragraphType && !resolved.nodeAfter.content.size) {
-    editor.view.dispatch(
-      state.tr
-        .setSelection(TextSelection.create(state.doc, insertionPosition + 1))
-        .setMeta("pointer", true),
-    );
-    return true;
-  }
-
-  if (resolved.nodeBefore?.type === paragraphType && !resolved.nodeBefore.content.size) {
-    const paragraphStart = insertionPosition - resolved.nodeBefore.nodeSize;
-    editor.view.dispatch(
-      state.tr
-        .setSelection(TextSelection.create(state.doc, paragraphStart + 1))
-        .setMeta("pointer", true),
-    );
-    return true;
-  }
-
-  const nextParagraph = paragraphType.create({ id: id() });
-  const transaction = closeHistory(state.tr.insert(insertionPosition, nextParagraph));
-  transaction.setSelection(TextSelection.create(transaction.doc, insertionPosition + 1));
-  transaction.setMeta("pointer", true);
-  editor.view.dispatch(transaction.scrollIntoView());
-  return true;
+  return placeCaretInSlot(editor, position);
 }
 
 function focusEditorAtDocumentEnd() {
@@ -3389,12 +3647,18 @@ function focusAfterInlineProperty(blockId) {
 
 function insertParagraphFromEmptySurface(event) {
   if (selectionMode !== "off" || !editor.isEditable || event.defaultPrevented) return false;
+  if (editor.view.composing || event.button !== 0 || window.PennedBlockSelection?.consumesClick(event)) return false;
 
   const target = event.target;
   if (!(target instanceof HTMLElement)) return false;
 
   const content = editor.view.dom;
-  const gapPosition = paragraphGapInsertionPositionAtPoint(target, event.clientX, event.clientY);
+  if (target.closest("button, a, input, textarea, select, audio, video, iframe, [role='button']")) return false;
+  if (placeCaretOnTrailingNumberedLine(editor, target, event.clientX, event.clientY)) {
+    event.preventDefault();
+    return true;
+  }
+  const gapPosition = blockGapAtPoint(editor, target, event.clientX, event.clientY);
   const isEmptyEditorSurface =
     target === content ||
     target.id === "editor" ||
@@ -3473,6 +3737,12 @@ document.addEventListener("mousedown", (event) => {
     event.preventDefault();
   }
 });
+
+// Card node views own their normal clicks. Handle only their surrounding gaps
+// before those views stop propagation, leaving taps on the cards themselves alone.
+document.addEventListener("click", event => {
+  if (insertParagraphFromEmptySurface(event)) event.stopImmediatePropagation();
+}, true);
 
 if (!window.PennedBlockSelection) document.addEventListener(
   "pointerdown",
@@ -3627,11 +3897,13 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       return true;
     }
     case "setContent":
+      resetCaretInsertions(editor);
       lastNativeCollectionSignature = "";
       {
         const normalizedDocument = normalizeLoadedTipTapDocument(args.document ?? args);
         traceCalloutAttrs("command-setContent-before-setContent", normalizedDocument);
-        editor.chain().setContent(normalizedDocument, { emitUpdate: false }).command(({ tr }) => {
+        editor.chain().command(({ tr }) => { tr.setMeta("pennedPlaceholderDocumentLoad", true); return true; })
+          .setContent(normalizedDocument, { emitUpdate: false }).command(({ tr }) => {
           tr.setDocAttribute("taskHistoryProjection", normalizedDocument.attrs?.taskHistoryProjection ?? null);
           return true;
         }).run();
@@ -3713,9 +3985,16 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 	          text: args.text || "",
 	        })
 	        .run();
+      case "plainCalloutCaptureInsertion":
+        return editor.isEditable && selectionMode === "off" ? beginCaretInsertion(editor) : false;
+      case "plainCalloutEndInsertion":
+        return endCaretInsertion(editor, args.token);
 	    case "insertBlock":
-	      return insertBlockByKey(args.blockType || "paragraph", null, args.color);
+	      return insertBlockByKey(args.blockType || "paragraph", null, args.color, args.insertionToken);
 	    case "setSelectedBlockType":
+	      if (typeof args.blockType === "string" && args.blockType.startsWith("divider:")) {
+	        return convertSelectedDividers(args.blockType.slice("divider:".length));
+	      }
 	      transformSelectedBlocks(args.blockType, args);
 	      return true;
 	    case "setSelectedCalloutColor":
@@ -3735,9 +4014,13 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 	      updateCalloutColor(args.blockId, args.color);
 	      return true;
     case "indentSelectedBlocks":
+      if (movePageReferences(1)) return true;
       return focusedChain().sinkListItem("listItem").run() || focusedChain().sinkListItem("taskItem").run();
     case "outdentSelectedBlocks":
+      if (movePageReferences(-1)) return true;
       return focusedChain().liftListItem("listItem").run() || focusedChain().liftListItem("taskItem").run();
+    case "indentPageReference":
+      return movePageReferences(args.outdent ? -1 : 1, args.documentID);
 	    case "selectAllBlocks":
 	      setSelectionMode("multi");
 	      selection.clear();

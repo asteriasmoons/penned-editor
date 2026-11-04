@@ -274,7 +274,7 @@ test("read-only files open their existing context without modifying content", as
 test("template and Daily Note contexts retain attachment configuration without changing the source file", async () => {
   const h = await runtime([attachment(file(), { displayMode: "inline", widthPercent: 60, textAlign: "center" })]);
   try {
-    await h.command("setTemplateEditing", { enabled: true });
+    await h.command("setTemplateEditing", { enabled: true, documentID: "template-document", templateID: "template-record" });
     const saved = await h.json();
     await h.command("setTemplateEditing", { enabled: false });
     await h.command("setContent", { document: saved });
