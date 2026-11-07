@@ -157,6 +157,10 @@ export function beginCaretInsertion(editor) {
   return token;
 }
 
+export function hasCaretInsertion(editor, token) {
+  return typeof token === "string" && key.getState(editor.state)?.sheet?.token === token;
+}
+
 export function restoreCaretInsertion(editor, token) {
   const sheet = key.getState(editor.state)?.sheet;
   if (!sheet || sheet.token !== token) return false;

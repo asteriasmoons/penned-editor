@@ -103,10 +103,18 @@ export function publicExtensions(options) {
     const color = card.backdrop === "photo" ? "#fff" : contrastColor(card.startColor);
     const miniature = second => ["span", { class: `reader-card-page${second ? " is-back" : ""}`, "aria-hidden": "true", style: `color:${validColor(record.textColorHex) || "#f7f7f7"};font-family:${documentFonts[record.fontStyle] || documentFonts.rounded}` },
       ...(!second && cover(record) ? [cover(record)] : []), ...(!second ? [["strong", {}, record.title], ["span", {}, record.excerpt || ""]] : [])];
-    const result = linked(record, { class: "reader-page-card", "data-card-size": card.size, "data-card-pages": String(card.showsPages), "data-card-width": String(width),
+    const sticky = card.previewStyle === "stickyNote";
+    const note = ["span", { class: "reader-sticky-note", "aria-hidden": "true" },
+      ["span", { class: "reader-sticky-note-paper" },
+        ["span", { class: "reader-sticky-note-content" }, ...(cover(record) ? [cover(record)] : []), ["strong", {}, record.title], ["span", {}, record.excerpt || ""]]]];
+    const open = card.previewStyle === "openPage";
+    const spread = ["span", { class: "reader-open-page-spread", "aria-hidden": "true", style: `color:${validColor(record.textColorHex) || "#f7f7f7"};font-family:${documentFonts[record.fontStyle] || documentFonts.rounded}` },
+      ["span", { class: "reader-open-page-sheet" }], ["span", { class: "reader-open-page-sheet is-right" }],
+      ["span", { class: "reader-open-page-flow" }, ...(cover(record) ? [cover(record)] : []), ["span", {}, record.excerpt || ""]]];
+    const result = linked(record, { class: "reader-page-card", "data-card-size": card.size, "data-card-pages": String(card.showsPages), "data-card-preview": open ? "openPage" : (sticky ? "stickyNote" : "pages"), "data-card-width": String(width),
       style: style({ "--card-width": `${width}px`, "--card-height": `${height}px`, "aspect-ratio": `${width}/${height}`, color }) },
       [["span", { class: "reader-page-card-face", style: style({ background, "font-family": documentFonts[record.fontStyle] || documentFonts.rounded }) },
-        ...(card.showsPages ? [["span", { class: "reader-card-pages" }, ...(["wide", "large"].includes(card.size) ? [miniature(true)] : []), miniature(false)]] : []),
+        ...(card.showsPages ? (open ? [spread] : (sticky ? [note] : [["span", { class: "reader-card-pages" }, ...(["wide", "large"].includes(card.size) ? [miniature(true)] : []), miniature(false)]])) : []),
         ["span", { class: "reader-page-card-copy" }, ["strong", {}, record.title], ["span", {}, record.excerpt || ""]]]]);
     return ["div", { class: "reader-page-card-block", id: record.readerAnchor }, result, ...photoCredit(card.remotePhoto), ...photoCredit(record.coverPhoto)];
   };
@@ -262,6 +270,24 @@ export function publicExtensions(options) {
           "font-weight": a.bold == null ? null : a.bold ? 700 : 400, "font-style": a.italic ? "italic" : null,
           "text-decoration": a.strike ? "line-through" : null, "text-align": ["left", "center", "right", "justify"].includes(a.align) ? a.align : "left" }) }, 0];
       } })),
+    Node.create({ name: "listGrid", group: "block", content: "listGridRow+", isolating: true, defining: true,
+      addAttributes: () => defaults({ cardBackground: "#E8DEF5", cardBorder: "#DBCEEF", leftBackground: "#D3C6E7", rightBorder: "#E4D9F3", leftFraction: 34 }),
+      renderHTML: ({ node }) => {
+        const a = node.attrs;
+        const frac = Math.max(20, Math.min(80, Math.round(Number(a.leftFraction)) || 34));
+        return ["div", { class: "penned-list-grid", style: style({
+          "box-sizing": "border-box", width: "100%", "max-width": "100%", padding: "12px", "border-radius": "18px",
+          background: validColor(a.cardBackground) || "#E8DEF5", border: `1px solid ${validColor(a.cardBorder) || "#DBCEEF"}`,
+          display: "flex", "flex-direction": "column", gap: "8px", overflow: "hidden",
+          "--lg-left-bg": validColor(a.leftBackground) || "#D3C6E7", "--lg-right-border": validColor(a.rightBorder) || "#E4D9F3",
+          "--lg-left-fraction": `${frac}%` }) }, 0];
+      } }),
+    Node.create({ name: "listGridRow", content: "listGridLabel listGridValue", isolating: true,
+      renderHTML: () => ["div", { class: "penned-list-grid-row", style: "display:grid;grid-template-columns:var(--lg-left-fraction,34%) minmax(0,1fr);gap:8px;align-items:stretch" }, 0] }),
+    Node.create({ name: "listGridLabel", content: "paragraph", isolating: true, defining: true,
+      renderHTML: () => ["div", { class: "penned-list-grid-label", style: "box-sizing:border-box;min-width:0;display:flex;align-items:center;padding:10px 14px;border-radius:12px;background:var(--lg-left-bg,#D3C6E7);font-weight:700;color:var(--vellix-primary-text,#211d29);overflow-wrap:anywhere" }, 0] }),
+    Node.create({ name: "listGridValue", content: "paragraph", isolating: true, defining: true,
+      renderHTML: () => ["div", { class: "penned-list-grid-value", style: "box-sizing:border-box;min-width:0;display:flex;align-items:center;padding:10px 14px;border-radius:12px;background:#ffffff;border:1px solid var(--lg-right-border,#E4D9F3);color:var(--vellix-primary-text,#211d29);overflow-wrap:anywhere" }, 0] }),
   ];
   const global = Extension.create({ name: "pennedReadingAttributes", addGlobalAttributes: () => [{ types: ["paragraph", "caption", "heading", "blockquote", "callout", "plainCallout", "toggleItem", "table", "attachment", "inlineProperty", "templateComponent", "publishedPage", "publishedCollection"],
     attributes: { readerAnchor: { default: null, renderHTML: attrs => attrs.readerAnchor ? { id: attrs.readerAnchor } : {} },

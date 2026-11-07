@@ -3,6 +3,42 @@ import { NodeSelection } from "@tiptap/pm/state";
 
 const pages = new Map();
 const subscribers = new Set();
+const pageElements = new Set();
+const knownRowParents = new WeakMap();
+const pendingRows = new Set();
+let rowFrame = null;
+
+function scheduleCardRows(element) {
+  pendingRows.add(element);
+  if (rowFrame !== null) return;
+  rowFrame = requestAnimationFrame(() => {
+    rowFrame = null;
+    const parents = new Set();
+    for (const card of pendingRows) {
+      const previous = knownRowParents.get(card);
+      if (previous?.isConnected) parents.add(previous);
+      const parent = card.parentElement;
+      if (parent?.isConnected) { parents.add(parent); knownRowParents.set(card, parent); }
+      else knownRowParents.delete(card);
+    }
+    pendingRows.clear();
+    for (const parent of parents) {
+      let index = 0;
+      for (const child of parent.children) {
+        if (child.hidden || child.classList.contains("ProseMirror-widget")) {
+          child.classList.remove("vellix-page-card-row-start", "vellix-page-card-row-end");
+          continue;
+        }
+        const small = child.classList.contains("vellix-page-card-inline");
+        if (child.classList.contains("vellix-page-reference")) {
+          child.classList.toggle("vellix-page-card-row-start", small && index % 2 === 0);
+          child.classList.toggle("vellix-page-card-row-end", small && index % 2 === 1);
+        }
+        index = small ? index + 1 : 0;
+      }
+    }
+  });
+}
 
 export function normalizePageReferenceStarters(content) {
   // A legacy reference occupies the empty editing slot directly after its page break.
@@ -28,6 +64,21 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
     group: "block",
     atom: true,
     selectable: true,
+    onTransaction({ transaction, appendedTransactions = [] }) {
+      // Text edits do not change card pairing. Only refresh rows after block-structure changes.
+      const changed = [transaction, ...appendedTransactions].some(tr => tr.docChanged &&
+        tr.mapping.maps.some((map, index) => {
+          let structural = false;
+          map.forEach((from, to, nextFrom, nextTo) => {
+            const before = tr.docs[index], after = tr.docs[index + 1] || tr.doc;
+            const a = before.resolve(from), b = before.resolve(to);
+            const c = after.resolve(nextFrom), d = after.resolve(nextTo);
+            if (!a.sameParent(b) || !c.sameParent(d) || !a.parent.isTextblock || !c.parent.isTextblock) structural = true;
+          });
+          return structural;
+        }));
+      if (changed) for (const element of pageElements) scheduleCardRows(element);
+    },
     addKeyboardShortcuts() {
       return {
         Tab: () => this.editor.state.selection.node?.type.name === this.name && (indent?.(1) ?? false),
@@ -97,11 +148,14 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
           for (const [key, value] of Object.entries(getRenderedAttributes(current, editor.extensionManager.attributes))) {
             dom.setAttribute(key, value);
           }
-          title.textContent = record?.title || "Page";
+          title.textContent = record?.title ?? "Page";
+          title.hidden = !title.textContent;
           excerpt.textContent = record?.previewText || "Empty page";
-          button.setAttribute("aria-label", `Open ${title.textContent}. ${excerpt.textContent}`);
+          button.setAttribute("aria-label", `Open ${title.textContent || "page"}. ${excerpt.textContent}`);
           const isCard = Boolean(record?.cardImage);
           dom.classList.toggle("vellix-page-card", isCard);
+          dom.classList.toggle("vellix-page-card-inline", isCard && !record.cardFullWidth);
+          dom.style.setProperty("--vellix-page-card-width", isCard ? `${Number(record.cardWidth) || 154}px` : "");
           thumbnail.hidden = isCard || !record?.thumbnail;
           text.hidden = isCard;
           cardImage.hidden = !isCard;
@@ -114,6 +168,7 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
           credit.replaceChildren();
           if (!credit.hidden) credit.append("Photo by ", creditLink(record.photographer || "Photographer", record.photographerURL), " on ", creditLink("Unsplash", record.sourceURL));
           if (record?.thumbnail && thumbnail.getAttribute("src") !== record.thumbnail) thumbnail.src = record.thumbnail;
+          scheduleCardRows(dom);
         };
         const preventFocus = (event) => {
           if (selectionActive()) return;
@@ -174,6 +229,7 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
           post("pageOpenRequest", { documentId: current.attrs.documentID });
         };
         button.addEventListener("click", open);
+        pageElements.add(dom);
         subscribers.add(render);
         render();
         return {
@@ -185,7 +241,7 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
           },
           stopEvent() { return !selectionActive(); },
           ignoreMutation() { return true; },
-          destroy() { cancelPress(); subscribers.delete(render); },
+          destroy() { cancelPress(); subscribers.delete(render); pageElements.delete(dom); scheduleCardRows(dom); },
         };
       };
     },

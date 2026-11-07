@@ -96,7 +96,15 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
     // text remain untouched; ProseMirror owns every generated inline span.
     stylesheet.textContent = ".vellix-gradient-fragment span[data-vellix-gradient]," +
       "span[data-vellix-gradient]:has(.vellix-gradient-fragment){background-image:none!important}";
-    doc.head.appendChild(stylesheet);
+    // :has() is costly for WebKit to evaluate on every style recalculation, so only
+    // keep this rule in the document while gradient text actually exists. Documents
+    // without any gradients then pay nothing for it.
+    const syncStylesheet = () => {
+      const needed = gradientKey.getState(view.state).index.records.length > 0;
+      if (needed && !stylesheet.isConnected) doc.head.appendChild(stylesheet);
+      else if (!needed && stylesheet.isConnected) stylesheet.remove();
+    };
+    syncStylesheet();
 
     function fragments(node) {
       const range = doc.createRange(), text = node.data, result = [];
@@ -131,6 +139,7 @@ export function createTextColor({ Mark, Extension, Plugin, PluginKey, TextSelect
     function paint() {
       frame = 0;
       if (destroyed || view.isDestroyed) return;
+      syncStylesheet();
       const decorations = [], signature = [];
       for (const record of gradientKey.getState(view.state).index.records) {
         const block = view.nodeDOM(record.pos);

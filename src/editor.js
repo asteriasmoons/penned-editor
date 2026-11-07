@@ -28,7 +28,7 @@ import { inlinePropertyNode } from "./inline-property-node.js";
 import { createCaretTracking } from "./caret-tracking.js";
 import { createCalloutListBackspace } from "./callout-list-backspace.js";
 import { CaretSlots, activeColumnInsertion, beginCaretInsertion, blockGapAtPoint, clearUnusedCaretSlots,
-  documentWithoutUnusedCaretSlots, endCaretInsertion, placeCaretInSlot, resetCaretInsertions, restoreCaretInsertion,
+  documentWithoutUnusedCaretSlots, endCaretInsertion, hasCaretInsertion, placeCaretInSlot, resetCaretInsertions, restoreCaretInsertion,
   trailingNumberedLine, separateTrailingNumberedLine, placeCaretOnTrailingNumberedLine } from "./caret-slots.js";
 import { calloutRow, CalloutRowCleanup, calloutWidthAttribute, resizableCalloutView } from "./resizable-callouts.js";
 import { calloutRowMetrics } from "./callout-layout.js";
@@ -36,6 +36,7 @@ import { unwrapRetiredColumns } from "./retired-column-content.js";
 import { createChecklistItem, createTaskIntegration, taskCommand } from "./document-tasks.js";
 import { pageReferenceNode, setPageReferences, normalizePageReferenceStarters } from "./page-reference-node.js";
 import { collectionNode, setCollections, setNativeCollectionHeight, iconAssetCSSVariable } from "./collection-node.js";
+import { createListGrid } from "./list-grid.js";
 import { nativeCollectionRegions } from "./native-collection-regions.js";
 import { prepareDocumentPresentation } from "./presentation-ready.js";
 import { applyEditorAppearance } from "./appearance.js";
@@ -99,8 +100,10 @@ const PennedListItem = ListItem.extend({
   },
 });
 const SLASH_ITEMS = [
+  { key: "templates", title: "Templates", detail: "Browse and insert a template", icon: "copy" },
   { key: "collection", title: "Collection", detail: "Document Table and Gallery views", icon: "linedpages" },
   { key: "table", title: "Table", detail: "Rows, columns and formulas", icon: "blackcal" },
+  { key: "listGrid", title: "List Grid", detail: "Labeled rows in a grid", icon: "blackcal" },
   { key: "heading1", title: "Title", detail: "H1, 24px", icon: "h1" },
   { key: "heading2", title: "Subtitle", detail: "H2, 21px", icon: "h2" },
   { key: "heading3", title: "Heading", detail: "H3, 18px", icon: "h3" },
@@ -880,6 +883,44 @@ const BlockID = Extension.create({
       },
     ];
   },
+  addProseMirrorPlugins() {
+    const assignKey = new PluginKey("vellixBlockIDAssign");
+    // Ordinary blocks that should carry a persistent, auto-generated id. attachment,
+    // taskItem, the callout family, collection and templateComponent already assign
+    // and dedupe their own ids in their own extensions, so they are left out here to
+    // avoid two assigners touching the same node.
+    const autoIdTypes = new Set([
+      "paragraph", "caption", "heading", "codeBlock", "blockquote",
+      "bulletList", "orderedList", "listItem", "taskList",
+      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid",
+    ]);
+    const accepts = (node) => autoIdTypes.has(node.type.name);
+    return [new Plugin({
+      key: assignKey,
+      state: {
+        init: (_config, state) => createNodeIndex(state.doc, accepts),
+        apply: (tr, index) => updateNodeIndex(index, tr, accepts),
+      },
+      // Give any accepted block that lacks an id (just typed, split off with Enter,
+      // or loaded from a document saved before ids existed) a fresh one, and replace
+      // any id duplicated by paste or node duplication so every id stays unique and
+      // stable across edits. Only processes blocks that were actually added/replaced,
+      // so once every id is present and unique it stops — no redraw loop.
+      appendTransaction(transactions, oldState, newState) {
+        if (!transactions.some((tr) => tr.docChanged)) return null;
+        const before = new Set(assignKey.getState(oldState).records.map((record) => record.node));
+        const records = assignKey.getState(newState).records;
+        const seen = new Set(records.filter((record) => before.has(record.node)).map((record) => record.node.attrs.id));
+        const tr = newState.tr;
+        for (const { node, pos } of records) {
+          if (before.has(node)) continue;
+          if (!node.attrs.id || seen.has(node.attrs.id)) tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: id() });
+          seen.add(tr.doc.nodeAt(pos).attrs.id);
+        }
+        return tr.docChanged ? tr : null;
+      },
+    })];
+  },
 });
 
 const VellixTaskItem = createChecklistItem(TaskItem, {
@@ -1495,6 +1536,10 @@ let lastSelectionHandleEvent = { key: "", time: 0 };
 let lastHeight = -1;
 let contentHeightFrame = null, lastContentHeightFrame = -1;
 let lastVisualContentBottom = -1;
+// The reported height only changes when the editor content box resizes, so a
+// ResizeObserver flips this true and the measurement runs then. Same-line typing
+// leaves it false and skips the forced getBoundingClientRect height read entirely.
+let contentSizeDirty = true;
 let lastSelectionCount = -1;
 let lastPageBreakSignature = "";
 let lastNativeCollectionSignature = "";
@@ -1510,6 +1555,9 @@ const documentTags = createDocumentTags({ post: postToSwift, snapshot: () => sna
 
 const textColor = createTextColor({ ...textColorDependencies, post: postToSwift,
   snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
+const listGridModule = createListGrid({ post: postToSwift,
+  snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
+const ListGridGuard = Extension.create({ name: "vellixListGridGuard", addProseMirrorPlugins: () => listGridModule.plugins });
 const editor = new Editor({
   element: document.getElementById("editor"),
   extensions: [
@@ -1534,6 +1582,8 @@ const editor = new Editor({
     attachments.integration,
     documentTags.node,
     documentTags.integration,
+    ...listGridModule.nodes,
+    ListGridGuard,
     StarterKit.configure({
       listItem: false,
       blockquote: false,
@@ -1594,6 +1644,16 @@ const editor = new Editor({
 
 const caretTracking = createCaretTracking({ editor, post: postToSwift, reportHeight: reportContentHeight,
   selectionActive: () => selectionMode !== "off" });
+
+// Drive the height measurement from the content box resizing rather than from
+// every keystroke. A ResizeObserver fires only when the editor DOM actually
+// changes size — a line added or removed, text wrapping, a font finishing load,
+// an image settling — which is the only time the reported height can change. This
+// removes the per-keystroke forced layout that dominated long-document editing;
+// same-line typing now triggers no height read at all.
+if (typeof ResizeObserver === "function" && editor?.view?.dom) {
+  new ResizeObserver(() => { contentSizeDirty = true; reportContentHeight(); }).observe(editor.view.dom);
+}
 
 function isCalloutProbeElement(element) {
   return !!element?.matches?.(
@@ -2400,24 +2460,31 @@ function measureContentHeight() {
   const root = document.querySelector(".vellix-editor-page");
   const content = editor?.view?.dom;
 
-  let height = 60;
-  let visualContentBottom = 60;
-  if (root && content instanceof HTMLElement && isVisibleElement(content)) {
-    const top = root.getBoundingClientRect().top;
-    // Keep the WKWebView aligned to the complete rendered editor DOM so empty
-    // surface taps remain inside the web view and can create a paragraph.
-    const bottom = content.getBoundingClientRect().bottom;
-    height = Math.max(60, Math.ceil(bottom - top + 2));
-    visualContentBottom = Math.min(height, reportedVisualContentBottom(root, content));
-  }
+  // The height measurement reads getBoundingClientRect on the full editor DOM,
+  // which forces a synchronous document-wide layout. Only do it when the content
+  // box actually resized (the ResizeObserver sets contentSizeDirty); same-line
+  // typing cannot change the height, so it skips this entirely.
+  if (contentSizeDirty) {
+    contentSizeDirty = false;
+    let height = 60;
+    let visualContentBottom = 60;
+    if (root && content instanceof HTMLElement && isVisibleElement(content)) {
+      const top = root.getBoundingClientRect().top;
+      // Keep the WKWebView aligned to the complete rendered editor DOM so empty
+      // surface taps remain inside the web view and can create a paragraph.
+      const bottom = content.getBoundingClientRect().bottom;
+      height = Math.max(60, Math.ceil(bottom - top + 2));
+      visualContentBottom = Math.min(height, reportedVisualContentBottom(root, content));
+    }
 
-  if (
-    Math.abs(height - lastHeight) > 1 ||
-    Math.abs(visualContentBottom - lastVisualContentBottom) > 1
-  ) {
-    lastHeight = height;
-    lastVisualContentBottom = visualContentBottom;
-    postToSwift("height", { height, visualContentBottom });
+    if (
+      Math.abs(height - lastHeight) > 1 ||
+      Math.abs(visualContentBottom - lastVisualContentBottom) > 1
+    ) {
+      lastHeight = height;
+      lastVisualContentBottom = visualContentBottom;
+      postToSwift("height", { height, visualContentBottom });
+    }
   }
 
   const features = documentFeaturePresence();
@@ -3197,12 +3264,16 @@ function formatCurrentSelection(action, value = null) {
   }
 }
 
-function deleteSelected() {
-  if (window.PennedBlockSelection?.deleteSelected()) { postToSwift("snapshot", snapshotPayload()); return; }
+function deleteSelected(immediateSnapshot = false) {
+  const before = editor.state.doc;
+  if (window.PennedBlockSelection?.deleteSelected()) {
+    postToSwift("snapshot", snapshotPayload());
+    return editor.state.doc !== before;
+  }
   const selectedByPath = selectedBlockIndexMap();
   if (!selectedByPath.size) {
     postToSwift("error", { message: "Select at least one block first." });
-    return;
+    return false;
   }
   const nextDocument = normalizeTipTapDocument(editor.getJSON());
   const deleteNodes = (nodes, parentPath = []) => nodes.flatMap((node, index) => {
@@ -3219,7 +3290,9 @@ function deleteSelected() {
   if (fileOperation) editor.view.dispatch(closeHistory(editor.state.tr));
   selection.clear();
   commitDocument(nextDocument.content.length ? nextDocument : normalizeTipTapDocument(null), deletionRanges);
-  if (fileOperation) { editor.view.dispatch(closeHistory(editor.state.tr)); postToSwift("snapshot", snapshotPayload()); }
+  if (fileOperation) editor.view.dispatch(closeHistory(editor.state.tr));
+  if (fileOperation || immediateSnapshot) postToSwift("snapshot", snapshotPayload());
+  return editor.state.doc !== before;
 }
 
 function duplicateSelected() {
@@ -3263,13 +3336,52 @@ async function cutSelected() {
   return true;
 }
 
+let pendingSubpage = null;
+
 function requestSubpage() {
   const blocks = selectedBlocks();
-  if (!blocks) return;
+  if (!blocks) return false;
+  const token = id();
+  pendingSubpage = { token, doc: editor.state.doc, keys: [...selection].sort() };
   postToSwift("selectedBlocksForSubpage", {
-    title: plainText(blocks).trim() || "New Sub Page",
+    token,
     document: normalizeTipTapDocument({ type: "doc", content: blocks }),
   });
+  return true;
+}
+
+function placeGroupedPage(token, documentID) {
+  if (pendingSubpage?.token !== token) return false;
+  const request = pendingSubpage;
+  pendingSubpage = null;
+  if (!editor.options.editable || selectionMode === "off" || editor.state.doc !== request.doc ||
+      selection.size !== request.keys.length || !request.keys.every(key => selection.has(key)) ||
+      typeof documentID !== "string" || !documentID) return false;
+
+  const { state } = editor;
+  const reference = state.schema.nodes.pageReference.create({ id: id(), documentID });
+  let position = state.doc.content.size;
+  // Leave unselected trailing editing lines after the page, as on legacy recovery.
+  // Do not cross a selected block: the desktop selection still uses model paths.
+  for (let index = state.doc.childCount - 1; index >= 0; index--) {
+    const node = state.doc.child(index);
+    const start = position - node.nodeSize;
+    if (node.type.name !== "paragraph" || node.content.size || node.attrs.placeholderEnabled ||
+        node.attrs.indent || node.attrs.textAlign || selection.has(selectionKeyForModelPath([index], start))) break;
+    position = start;
+  }
+  // Creation and reparenting are persisted natively. Like the previous
+  // unplaced page, the new reference survives undo of the source deletion.
+  const insert = state.tr.insert(position, reference)
+    .setMeta("addToHistory", false).setMeta("preventUpdate", true);
+  editor.view.dispatch(insert);
+  if (editor.state.doc === state.doc) return false;
+  editor.view.dispatch(closeHistory(editor.state.tr).setMeta("addToHistory", false));
+  if (!deleteSelected(true)) {
+    postToSwift("snapshot", snapshotPayload());
+    postToSwift("error", { message: "The nested page was created, but the source blocks could not be removed." });
+  }
+  return true;
 }
 
 function insertNode(node) {
@@ -3381,6 +3493,13 @@ function blockNodeForKey(key) {
 
 function insertBlockByKey(key, range = null, color = null, insertionToken = null) {
   if (!editor.isEditable || selectionMode !== "off") return false;
+  if (key === "templates") {
+    if (range) editor.commands.deleteRange(range);
+    const token = beginCaretInsertion(editor);
+    editor.commands.blur();
+    postToSwift("templateRequest", { token });
+    return true;
+  }
   if (insertionToken && !restoreCaretInsertion(editor, insertionToken)) return false;
   const column = key === "plainCallout" ? activeColumnInsertion(editor.state) : null;
   const location = editor.state.selection.$from;
@@ -3405,6 +3524,32 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
   if (key === "table") {
     if (range) editor.chain().deleteRange(range).run();
     return window.VellixTables.command("requestInsert");
+  }
+  if (key === "listGridSettings") {
+    return listGridModule.command(editor, "listGridRequestSelectedSettings");
+  }
+  if (key === "listGrid") {
+    const json = listGridModule.listGridJSON();
+    const chain = editor.chain().focus();
+    (range ? chain.deleteRange(range) : chain).insertContent(json).run();
+    // Place the caret in the first label cell so the user can type immediately.
+    let caret = null;
+    editor.state.doc.descendants((node, pos) => {
+      if (caret !== null) return false;
+      if (node.type.name === "listGrid" && node.attrs.id === json.attrs.id) {
+        node.descendants((child, offset) => {
+          if (caret !== null) return false;
+          if (child.type.name === "paragraph") { caret = pos + 1 + offset + 1; return false; }
+          return undefined;
+        });
+        return false;
+      }
+      return undefined;
+    });
+    if (caret !== null) editor.commands.setTextSelection(caret);
+    renderCalloutIcons();
+    requestAnimationFrame(reportContentHeight);
+    return true;
   }
   if (key === "nestedPage" || key === "pageCard") {
     if (!editor.isEditable || selectionMode !== "off") return false;
@@ -3804,8 +3949,27 @@ const resizeObserver = new ResizeObserver(() => {
 resizeObserver.observe(document.documentElement);
 
 window.tiptapCommand = async function tiptapCommand(name, args = {}) {
+  if (name === "templateInsertionAvailable") return editor.isEditable && selectionMode === "off" && hasCaretInsertion(editor, args.token);
+  if (name === "templateEndInsertion") return endCaretInsertion(editor, args.token);
+  if (name === "insertTemplate") {
+    if (!editor.isEditable || selectionMode !== "off" || !hasCaretInsertion(editor, args.token)) return false;
+    const content = editor.schema.nodeFromJSON(normalizeTipTapDocument(args.document)).content;
+    if (!content.size || !restoreCaretInsertion(editor, args.token)) return false;
+    const before = editor.state.doc;
+    const inserted = editor.chain().command(({ tr }) => { closeHistory(tr); return true; })
+      .insertContent(content.toJSON()).run();
+    if (!inserted || editor.state.doc === before) return false;
+    editor.view.dispatch(closeHistory(editor.state.tr).setMeta("addToHistory", false));
+    renderCalloutIcons();
+    reportContentHeight();
+    postToSwift("snapshot", snapshotPayload());
+    editor.view.focus();
+    return true;
+  }
   const colorResult = textColor.command(editor, name, args);
   if (colorResult !== undefined) return colorResult;
+  const listGridResult = listGridModule.command(editor, name, args);
+  if (listGridResult !== undefined) return listGridResult;
   const pennedSelectionResult = window.PennedBlockSelection?.command(name, args);
   if (pennedSelectionResult !== undefined) return pennedSelectionResult;
   const tagResult = await documentTags.command(editor, name, args);
@@ -3897,6 +4061,7 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       return true;
     }
     case "setContent":
+      pendingSubpage = null;
       resetCaretInsertions(editor);
       lastNativeCollectionSignature = "";
       {
@@ -4044,8 +4209,9 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       duplicateSelected();
       return true;
     case "requestSelectedBlocksForSubpage":
-      requestSubpage();
-      return true;
+      return requestSubpage();
+    case "placeGroupedPage":
+      return placeGroupedPage(args.token, args.documentId);
     case "requestSnapshot":
       postToSwift("snapshot", snapshotPayload());
       return true;

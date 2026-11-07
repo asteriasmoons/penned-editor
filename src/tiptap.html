@@ -149,7 +149,7 @@
         background: transparent !important;
         color: var(--vellix-primary-text) !important;
         overflow: visible !important;
-        caret-color: var(--vellix-primary-text);
+        caret-color: var(--lg-caret-ink, var(--vellix-primary-text));
         outline: none;
       }
 
@@ -351,6 +351,22 @@
       .vellix-page-reference-excerpt { font-size: 14px; line-height: 1.3; opacity: 0.48; }
       .vellix-page-reference-title, .vellix-page-reference-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .vellix-page-card { padding: 6px 0; }
+      /* Override the editor's generic [data-vellix-block-id] width, as callout rows do. */
+      .tiptap-editor .vellix-page-reference.vellix-page-card {
+        display: inline-block; vertical-align: top;
+        width: var(--vellix-page-card-width, 154px); max-width: 100%;
+        margin-inline-end: clamp(0px, calc(50% - var(--vellix-page-card-width, 154px)), 12px);
+      }
+      .tiptap-editor .vellix-page-reference.vellix-page-card-inline {
+        width: calc((100% - 12px) / 2); margin-inline-end: 0;
+        margin-block: var(--penned-block-gap, 0px) !important; padding-block: 6px;
+      }
+      .tiptap-editor .vellix-page-reference.vellix-page-card-inline.vellix-page-card-row-start { margin-inline-end: 12px; }
+      .tiptap-editor .vellix-page-card-inline > .vellix-page-reference-button { width: 100% !important; }
+      .tiptap-editor .vellix-page-reference.vellix-page-card:has(> .vellix-page-reference-button[style*="width: 100%"]) {
+        display: block; width: 100%; margin-inline-end: 0;
+      }
+      .tiptap-editor .vellix-page-reference[hidden] { display: none !important; }
       .vellix-page-card .vellix-page-reference-button {
         display: block; position: relative; padding: 0; max-width: 100%; min-height: 0;
         border-radius: 8px; background-size: cover; background-position: center;
@@ -1314,9 +1330,10 @@
       .penned-collection-cover { aspect-ratio: 1.78; width: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: rgba(var(--vellix-neutral-rgb), 0.043137); color: var(--vellix-property-accent); }
       .penned-collection-cover img { display: block; width: 100%; height: 100%; object-fit: cover; margin: 0 !important; }
       .penned-collection-card-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; overflow-wrap: anywhere; padding: 10px 10px 4px; line-height: 1.4; }
-      .penned-collection-card-values { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px; padding: 4px 10px; }
+      .penned-collection-card-values { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: 4px; padding: 4px 10px; height: 36px; box-sizing: border-box; overflow: hidden; }
       .penned-collection-value { flex-wrap: wrap; overflow-wrap: anywhere; min-width: 0; gap: 4px; font-size: 13px !important; }
-      .penned-collection-card-values .penned-collection-value { padding: 0; min-height: 24px; }
+      .penned-collection-card-values .penned-collection-value { padding: 0; min-height: 24px; max-height: 28px; max-width: 100%; flex-wrap: nowrap; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .penned-collection-card-values .penned-collection-chip { flex-shrink: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
       .penned-collection-chip { display: inline-block; max-width: 100%; color: var(--chip-color); background: color-mix(in srgb, var(--chip-color) 16%, transparent); border-radius: 4px; padding: 3px 6px; overflow-wrap: anywhere; }
       .penned-collection-entry-actions { position: absolute; right: 2px; bottom: 0; min-height: 32px; }
       .penned-collection-empty-value { opacity: .5; }
@@ -1330,7 +1347,7 @@
       .penned-collection-footer { display: flex; justify-content: space-between; padding-top: 8px; color: var(--vellix-property-accent); }
       .penned-collection-empty { font-size: 14px; opacity: .6; padding: 20px 8px; }
       .penned-collection-compact .penned-collection-card-title { font-size: 14px; padding: 6px 8px 2px; }
-      .penned-collection-compact .penned-collection-card-values { padding: 2px 8px; }
+      .penned-collection-compact .penned-collection-card-values { padding: 2px 8px; height: 32px; }
       .penned-template-component { margin: 20px 0; padding: 12px 0; min-width: 0; max-width: 100%; color: var(--vellix-primary-text); -webkit-user-select: none; user-select: none; }
       html:not(.vellix-selection-mode) .tiptap-editor [data-template-component] { -webkit-user-select: none !important; user-select: none !important; }
       .penned-template-component:is([data-component-kind="slider"], [data-component-kind="rating"]) { margin: 6px 0 12px; padding: 0; }
@@ -1474,6 +1491,75 @@
       .vellix-selection-mode .penned-attachment > :is(video, audio) { pointer-events: none; }
       .vellix-selection-mode .penned-audio-pill { pointer-events: none; }
       .vellix-selection-mode .penned-video-frame { pointer-events: none; }
+
+      /* List Grid (Description Grid) */
+      .penned-list-grid {
+        --lg-gap: 6px;
+        margin: 14px 0;
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+        padding: 6px;
+        border-radius: 8px;
+        background: var(--lg-card-bg, #f2f2f2);
+        border: 1px solid var(--lg-card-border, #d1d1d1);
+        display: flex;
+        flex-direction: column;
+        gap: var(--lg-gap);
+        overflow: hidden;
+        -webkit-touch-callout: none;
+      }
+      html:not(.vellix-selection-mode) .tiptap-editor .penned-list-grid[data-list-grid-touch-pending],
+      html:not(.vellix-selection-mode) .tiptap-editor .penned-list-grid[data-list-grid-touch-pending] * {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+      }
+      .penned-list-grid-row {
+        display: grid;
+        grid-template-columns: minmax(0, var(--lg-left-fraction, 34fr)) minmax(0, var(--lg-right-fraction, 66fr));
+        gap: var(--lg-gap);
+        align-items: stretch;
+      }
+      .penned-list-grid-label,
+      .penned-list-grid-value {
+        box-sizing: border-box;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        min-height: 42px;
+        padding: 8px 9px;
+        border-radius: 4px;
+        color: var(--lg-cell-ink, #171717);
+        caret-color: var(--lg-cell-ink, #171717);
+        overflow-wrap: anywhere;
+      }
+      .penned-list-grid-label {
+        --lg-cell-ink: var(--lg-left-ink, #171717);
+        background: var(--lg-left-bg, #e4e4e4);
+        font-weight: 400;
+      }
+      .penned-list-grid-value,
+      .penned-list-grid-row[data-lg-row-style="outlined"] > .penned-list-grid-label {
+        --lg-cell-ink: #171717;
+        background: #ffffff;
+        border: 1px solid var(--lg-right-border, #d1d1d1);
+      }
+      .penned-list-grid-row[data-lg-row-style="filled"] > .penned-list-grid-value {
+        --lg-cell-ink: var(--lg-left-ink, #171717);
+        background: var(--lg-left-bg, #e4e4e4);
+        border: none;
+      }
+      .tiptap-editor .penned-list-grid-label > p,
+      .tiptap-editor .penned-list-grid-value > p {
+        color: var(--lg-cell-ink, #171717);
+        margin: 0;
+        width: 100%;
+        min-width: 0;
+      }
+      .penned-list-grid.ProseMirror-selectednode {
+        outline: 2px solid #a970ff;
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>
@@ -1490,6 +1576,7 @@
         const sheet = style.sheet;
         const rules = new Map();
         let frame = 0;
+        let measurePending = false;
 
         function firstLineAlignment(text) {
           const first = [...text.querySelectorAll("p,h1,h2,h3,h4,h5,h6,pre")]
@@ -1529,6 +1616,12 @@
 
         function update() {
           frame = 0;
+          // firstLineAlignment forces a synchronous layout, so only measure when
+          // geometry may have changed (a resize, a font load, or a new/changed
+          // callout) rather than on every DOM mutation. Rule structure (adding and
+          // removing per-callout rules, the icon) is kept in sync cheaply regardless.
+          let measure = measurePending;
+          measurePending = false;
           const active = new Set();
           const measurements = [];
           for (const callout of root.querySelectorAll(".vellix-callout")) {
@@ -1545,10 +1638,12 @@
               entry = { rule: sheet.cssRules[index], text, alignment: null };
               rules.set(id, entry);
               resize.observe(text);
+              measure = true;
             } else if (entry.text !== text) {
               resize.unobserve(entry.text);
               entry.text = text;
               resize.observe(text);
+              measure = true;
             }
             const icon = (callout.dataset.calloutIcon || "sparkle").trim() || "sparkle";
             if (entry.icon !== icon) {
@@ -1558,6 +1653,7 @@
                 `var(--vellix-asset-${CSS.escape(icon)}, var(--vellix-asset-sparkle))`,
               );
             }
+            if (!measure) continue;
             const alignment = firstLineAlignment(text);
             if (alignment !== null && Number.isFinite(alignment.anchor) &&
                 (entry.alignment === null || entry.alignment.populated !== alignment.populated ||
@@ -1582,21 +1678,28 @@
           }
         }
 
-        function schedule() {
+        function schedule(measure) {
+          if (measure) measurePending = true;
           if (!frame) frame = requestAnimationFrame(update);
         }
-        const resize = new ResizeObserver(schedule);
+        // A callout's own text box resizing (wrapping, a line added or removed) is
+        // what actually changes its first-line alignment, and this per-text observer
+        // catches exactly that — so it requests a measure.
+        const resize = new ResizeObserver(() => schedule(true));
         resize.observe(root);
-        new MutationObserver(schedule).observe(root, {
-          subtree: true, childList: true, characterData: true, attributes: true,
+        // Structure only: detect added/removed callouts and icon changes. NOT
+        // characterData — typing that does not resize a callout cannot change its
+        // alignment, so it must not force a layout measurement on every keystroke.
+        new MutationObserver(() => schedule(false)).observe(root, {
+          subtree: true, childList: true, attributes: true, attributeFilter: ["data-callout-icon"],
         });
-        new MutationObserver(schedule).observe(document.documentElement, {
+        new MutationObserver(() => schedule(true)).observe(document.documentElement, {
           attributes: true, attributeFilter: ["style"],
         });
-        window.addEventListener("resize", schedule);
-        document.fonts.addEventListener("loadingdone", schedule);
-        document.fonts.ready.then(schedule);
-        schedule();
+        window.addEventListener("resize", () => schedule(true));
+        document.fonts.addEventListener("loadingdone", () => schedule(true));
+        document.fonts.ready.then(() => schedule(true));
+        schedule(true);
       })();
     </script>
     <style>
