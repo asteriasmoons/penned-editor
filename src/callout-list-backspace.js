@@ -16,7 +16,7 @@ function numberedCalloutBoundary(state) {
   let calloutDepth = 0, list = null;
   for (let depth = $from.depth - 1; depth > 0; depth--) {
     const name = $from.node(depth).type.name;
-    if (!calloutDepth && ["callout", "plainCallout"].includes(name)) calloutDepth = depth;
+    if (!calloutDepth && ["callout", "gridCard", "iconCallout", "plainCallout"].includes(name)) calloutDepth = depth;
     if (!list && ["orderedList", "bulletList", "taskList"].includes(name)) list = { name, depth };
   }
   if (!calloutDepth || (list && list.depth > calloutDepth && list.name !== "orderedList")) return null;

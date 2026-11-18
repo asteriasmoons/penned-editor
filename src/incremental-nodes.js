@@ -1,3 +1,5 @@
+import { ReplaceStep } from "@tiptap/pm/transform";
+
 // Index only feature nodes; map their positions instead of walking unchanged text.
 export function changedRanges(transaction) {
   const ranges = [];
@@ -68,4 +70,28 @@ export function updateNodeIndex(previous, transaction, accepts, descendIntoMatch
   return { doc: transaction.doc, records, changed: records.filter(record => !oldNodes.has(record.node)) };
 }
 
-globalThis.PennedIncrementalNodes = { changedRanges, createNodeIndex, updateNodeIndex };
+const textEdits = new WeakMap();
+
+// A closed replacement of text inside one textblock keeps all block IDs and
+// reference/attachment nodes intact. Atoms, structural edits and attr steps
+// deliberately use the regular path.
+export function inlineTextEdit(transaction) {
+  if (!transaction.docChanged) return false;
+  if (textEdits.has(transaction)) return textEdits.get(transaction);
+  const inline = transaction.steps.every((step, index) => {
+    if (!(step instanceof ReplaceStep) || step.slice.openStart || step.slice.openEnd) return false;
+    const doc = transaction.docs[index], from = doc.resolve(step.from);
+    const to = step.from === step.to ? from : doc.resolve(step.to);
+    if (!from.sameParent(to) || !from.parent.isTextblock) return false;
+    let textOnly = true;
+    step.slice.content.forEach(node => { if (!node.isText) textOnly = false; });
+    if (textOnly && step.from !== step.to) {
+      from.parent.nodesBetween(from.parentOffset, to.parentOffset, node => { if (!node.isText) textOnly = false; });
+    }
+    return textOnly;
+  });
+  textEdits.set(transaction, inline);
+  return inline;
+}
+
+globalThis.PennedIncrementalNodes = { changedRanges, createNodeIndex, updateNodeIndex, inlineTextEdit };

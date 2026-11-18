@@ -3,7 +3,7 @@ import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { closeHistory } from "@tiptap/pm/history";
 import { Mapping } from "@tiptap/pm/transform";
-import { createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
+import { createNodeIndex, inlineTextEdit } from "./incremental-nodes.js";
 
 export function cleanTagName(input) {
   const value = String(input ?? "").trim().replace(/^#/, "").normalize("NFC");
@@ -34,6 +34,11 @@ export function taggedInlineContent(node) {
 export function createDocumentTags({ post, snapshot, selectionActive, reportHeight }) {
   const key = new PluginKey("pennedDocumentTags");
   const hasID = node => "id" in node.attrs;
+  const idIndexes = new WeakMap();
+  const idRecords = doc => {
+    if (!idIndexes.has(doc)) idIndexes.set(doc, createNodeIndex(doc, hasID).records);
+    return idIndexes.get(doc);
+  };
   const pending = new Map();
   let catalogue = [], menu = null, active = null, highlighted = null;
   let highlightBlockID = null, liveEditor = null;
@@ -60,7 +65,8 @@ export function createDocumentTags({ post, snapshot, selectionActive, reportHeig
     const { $from, empty } = state.selection;
     if (!empty || !$from.parent.isTextblock || $from.parent.type.spec.code || state.storedMarks?.some(m => m.type.name === "code")) return null;
     if ($from.marks().some(m => ["code", "link"].includes(m.type.name))) return null;
-    const text = $from.parent.textBetween(0, $from.parentOffset, "\n", "\ufffc");
+    // A tag is at most 80 Unicode scalars (160 UTF-16 units), plus '#' and its boundary.
+    const text = $from.parent.textBetween(Math.max(0, $from.parentOffset - 162), $from.parentOffset, "\n", "\ufffc");
     const match = /(?:^|[\s([{])#([\p{L}\p{M}\p{N}_-]{0,80})$/u.exec(text);
     if (!match) return null;
     const to = $from.pos, from = to - match[1].length - 1;
@@ -149,27 +155,29 @@ export function createDocumentTags({ post, snapshot, selectionActive, reportHeig
       return [new Plugin({
         key,
         state: {
-          init: (_config, state) => createNodeIndex(state.doc, hasID),
+          init: () => null,
           apply(tr, index) {
             for (const [token, value] of pending) if (value.kind === "input") {
               const from = tr.mapping.mapResult(value.from, -1), to = tr.mapping.mapResult(value.to, 1);
               if (from.deletedAcross || to.deletedAcross || tr.doc.textBetween(from.pos, to.pos) !== value.text) pending.delete(token);
               else { value.from = from.pos; value.to = to.pos; }
             }
-            return updateNodeIndex(index, tr, hasID);
+            return index;
           },
         },
         appendTransaction(transactions, old, state) {
-          if (!transactions.some(tr => tr.docChanged)) return null;
+          if (!transactions.some(tr => tr.docChanged && !inlineTextEdit(tr))) return null;
           const seen = new Set(), tr = state.tr;
           const mapping = new Mapping(), preserved = new Map();
+          const records = idRecords(state.doc);
+          const byPosition = new Map(records.map(({ node, pos }) => [pos, node]));
           transactions.forEach(transaction => mapping.appendMapping(transaction.mapping));
-          for (const { node, pos } of key.getState(old).records) {
+          for (const { node, pos } of idRecords(old.doc)) {
             if (!node.attrs.id) continue;
             const mapped = mapping.mapResult(pos, 1);
-            if (!mapped.deletedAcross && state.doc.nodeAt(mapped.pos)?.attrs.id === node.attrs.id) preserved.set(node.attrs.id, mapped.pos);
+            if (!mapped.deletedAcross && byPosition.get(mapped.pos)?.attrs.id === node.attrs.id) preserved.set(node.attrs.id, mapped.pos);
           }
-          for (const { node, pos } of key.getState(state).records) {
+          for (const { node, pos } of records) {
             let id = node.attrs.id;
             // A paste before its source must not steal the original block's navigation ID.
             if (!id || (preserved.has(id) ? preserved.get(id) !== pos : seen.has(id))) {
@@ -199,7 +207,7 @@ export function createDocumentTags({ post, snapshot, selectionActive, reportHeig
           decorations(state) {
             if (!highlightBlockID) return null;
             const decorations = [];
-            for (const { node, pos } of key.getState(state).records) {
+            for (const { node, pos } of idRecords(state.doc)) {
               if (node.isBlock && node.attrs.id === highlightBlockID)
                 decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: "penned-tag-destination" }));
             }

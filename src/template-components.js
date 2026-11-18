@@ -126,7 +126,7 @@ export function createTemplateComponents({ Node, post, snapshot, selectionActive
         dom.addEventListener("click", suppressCompatibilityClick, true);
         dom.addEventListener("click", componentClick);
         const configure = () => {
-          if (enabled() && templateEditing) post("templateComponentConfigure", { blockID: current.attrs.id, definition: current.attrs.definition });
+          if (enabled()) requestSettings(current);
         };
         const commit = (value, flush = true) => {
           if (!enabled()) return;
@@ -301,5 +301,11 @@ export function createTemplateComponents({ Node, post, snapshot, selectionActive
     if (result) post("snapshot", snapshot());
     return result;
   }
-  return { node, command, refresh: () => views.forEach(render => render()) };
+  const canConfigure = node => templateEditing && !!node.attrs.definition;
+  function requestSettings(node) {
+    if (!canConfigure(node) || selectionActive()) return false;
+    post("templateComponentConfigure", { blockID: node.attrs.id, definition: node.attrs.definition });
+    return true;
+  }
+  return { node, command, refresh: () => views.forEach(render => render()), canConfigure, requestSettings };
 }

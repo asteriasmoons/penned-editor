@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createCaretTracking } from "../src/caret-tracking.js";
 
-function harness() {
+function harness(verticalOnly = false) {
   const handlers = new Map(), frames = new Map(), messages = [];
   let nextFrame = 0, focused = true, selecting = false;
   const previous = { window: globalThis.window, requestAnimationFrame: globalThis.requestAnimationFrame,
@@ -16,7 +16,7 @@ function harness() {
     view: { hasFocus: () => focused, coordsAtPos: position => { assert.equal(position, editor.state.selection.head); return coordinates; } },
     on(name, callback) { handlers.set(name, callback); } };
   const tracking = createCaretTracking({ editor, post: (kind, payload) => messages.push({ kind, payload }),
-    reportHeight: () => messages.push({ kind: "height" }), selectionActive: () => selecting });
+    verticalOnly, selectionActive: () => selecting });
   return { editor, coordinates, messages, tracking,
     emit: (name, payload) => handlers.get(name)?.(payload),
     focus: value => { focused = value; }, select: value => { selecting = value; },
@@ -24,17 +24,23 @@ function harness() {
     close() { Object.assign(globalThis, previous); } };
 }
 
-test("typing and selection changes coalesce after layout and report height before the active caret", () => {
-  const h = harness();
+test("mobile caret reports coalesce and skip same-line movement, but explicit reveals still work", () => {
+  const h = harness(true);
   try {
     for (let index = 0; index < 20; index++) h.emit("transaction", { transaction: { docChanged: true } });
     h.flush();
-    assert.deepEqual(h.messages, [{ kind: "height" }, { kind: "caret", payload: {
+    assert.deepEqual(h.messages, [{ kind: "caret", payload: {
       x: 105, y: 320, width: 1, height: 24, revision: 1
     } }]);
     h.editor.state.selection.head = 13;
+    h.coordinates.left = h.coordinates.right = 112;
     h.emit("transaction", { transaction: { selectionSet: true } }); h.flush();
-    assert.equal(h.messages.at(-1).payload.revision, 2, "typing resumes tracking even on the same visual line");
+    assert.equal(h.messages.length, 1);
+    h.tracking.schedule(); h.flush();
+    assert.equal(h.messages.at(-1).payload.revision, 2);
+    h.coordinates.top += 24; h.coordinates.bottom += 24;
+    h.emit("transaction", { transaction: { docChanged: true } }); h.flush();
+    assert.equal(h.messages.at(-1).payload.y, 344);
   } finally { h.close(); }
 });
 

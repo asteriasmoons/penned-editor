@@ -159,6 +159,10 @@
       }
 
       .tiptap-editor {
+        --vellix-indent-step: 18px;
+        --vellix-toggle-marker-width: 28px;
+        --vellix-toggle-column-gap: 8px;
+        --vellix-toggle-body-inset: calc(var(--vellix-toggle-marker-width) + var(--vellix-toggle-column-gap));
         font-size: 14px;
         font-weight: 400;
         line-height: 1.52 !important;
@@ -203,28 +207,38 @@
         text-align: right;
       }
 
+      .tiptap-editor [data-vellix-align="justify"] {
+        text-align: justify;
+      }
+
       .tiptap-editor [data-vellix-indent="1"] {
-        margin-left: 18px;
+        --vellix-block-indent: var(--vellix-indent-step);
+        margin-left: var(--vellix-block-indent);
       }
 
       .tiptap-editor [data-vellix-indent="2"] {
-        margin-left: 36px;
+        --vellix-block-indent: 36px;
+        margin-left: var(--vellix-block-indent);
       }
 
       .tiptap-editor [data-vellix-indent="3"] {
-        margin-left: 54px;
+        --vellix-block-indent: 54px;
+        margin-left: var(--vellix-block-indent);
       }
 
       .tiptap-editor [data-vellix-indent="4"] {
-        margin-left: 72px;
+        --vellix-block-indent: 72px;
+        margin-left: var(--vellix-block-indent);
       }
 
       .tiptap-editor [data-vellix-indent="5"] {
-        margin-left: 90px;
+        --vellix-block-indent: 90px;
+        margin-left: var(--vellix-block-indent);
       }
 
       .tiptap-editor [data-vellix-indent="6"] {
-        margin-left: 108px;
+        --vellix-block-indent: 108px;
+        margin-left: var(--vellix-block-indent);
       }
 
       .tiptap-editor h1,
@@ -245,6 +259,134 @@
       .tiptap-editor h4 { font-size: 16px; }
       .tiptap-editor h5 { font-size: 16px; }
       .tiptap-editor h6 { font-size: 16px; }
+
+      .tiptap-editor .penned-heading-label {
+        --label-tail: 15px;
+        padding-block: 4px;
+      }
+      .tiptap-editor .penned-heading-label[data-label-alignment="left"] { text-align: left; }
+      .tiptap-editor .penned-heading-label[data-label-alignment="center"] { text-align: center; }
+      .tiptap-editor .penned-heading-label[data-label-alignment="right"] { text-align: right; }
+      .tiptap-editor .penned-heading-label .penned-label-tile {
+        position: relative; isolation: isolate; vertical-align: top;
+        display: inline-flex; align-items: center; gap: .45em; max-width: 100%;
+        padding: .38em .78em; box-sizing: border-box; min-height: 1.98em; min-width: min(2.75em, 100%);
+        background-color: var(--label-grain-base, var(--label-bg)); border: var(--label-border-width, 1px) solid var(--label-border); border-radius: 10px;
+        color: var(--label-text);
+        -webkit-touch-callout: none;
+      }
+      .tiptap-editor .penned-heading-label .penned-label-text,
+      .tiptap-editor .penned-heading-label .penned-label-text * {
+        font-family: var(--label-font, var(--vellix-font-family)) !important;
+      }
+      .penned-label-text { min-width: 0; overflow-wrap: anywhere; }
+      .penned-label-icon {
+        flex: 0 0 1em; width: 1em; height: 1em; background: var(--label-icon);
+        -webkit-mask: var(--label-mask) center / contain no-repeat;
+        mask: var(--label-mask) center / contain no-repeat;
+      }
+      .tiptap-editor [data-label-shape="rectangular"] .penned-label-tile {
+        min-width: min(6em, 100%); padding-inline: 1.08em; border-radius: 12px;
+      }
+      .tiptap-editor [data-label-shape="pill"] .penned-label-tile { border-radius: 999px; padding-inline: 1.05em; }
+      .tiptap-editor [data-label-shape="ribbon"] .penned-label-tile {
+        border-radius: 4px; margin-inline: var(--label-tail); max-width: calc(100% - 2 * var(--label-tail));
+      }
+      .tiptap-editor [data-label-shape="ribbon"] .penned-label-tile::before,
+      .tiptap-editor [data-label-shape="ribbon"] .penned-label-tile::after {
+        content: ""; position: absolute; pointer-events: none; width: var(--label-tail);
+        top: 24%; bottom: -4px; background: var(--label-accent);
+        clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 31% 50%);
+      }
+      .tiptap-editor [data-label-shape="ribbon"] .penned-label-tile::before { right: 100%; }
+      .tiptap-editor [data-label-shape="ribbon"] .penned-label-tile::after { left: 100%; transform: scaleX(-1); }
+      .tiptap-editor [data-label-shape="framed"] .penned-label-tile {
+        --label-frame-outset: calc(var(--label-border-width, 1px) / 2);
+        border: 0; padding-inline: 1.25em; border-radius: 0; background: none;
+        margin: var(--label-frame-outset);
+        max-width: calc(100% - 2 * var(--label-frame-outset));
+      }
+      .tiptap-editor [data-label-shape="framed"] .penned-label-tile::before {
+        /* Clip the fill only; the outline must be free to straddle the edge. */
+        content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+        clip-path: var(--label-plaque); background-color: var(--label-grain-base, var(--label-bg));
+      }
+      .tiptap-editor .penned-label-frame {
+        position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none;
+        fill: none; stroke: var(--label-border); stroke-width: var(--label-border-width, 1px);
+      }
+      .tiptap-editor .penned-label-glass-material {
+        /* Lunixia's BubblyIconMaterial, using backdrop blur for the native glass layer. */
+        --label-glass-tint: color-mix(in srgb, var(--label-bg) 75%, transparent);
+        position: absolute; inset: 0; z-index: -1; pointer-events: none;
+        border-radius: inherit; container-type: size;
+        background: var(--label-glass-tint);
+        -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+      }
+      .tiptap-editor [data-label-shape="framed"] .penned-label-glass-material {
+        clip-path: var(--label-plaque);
+      }
+      .tiptap-editor .penned-label-glass-material::before {
+        content: ""; position: absolute; inset: 0; border-radius: inherit;
+        background-color: var(--label-glass-tint);
+        background-image:
+          linear-gradient(calc(180deg - atan2(50cqw, 100cqh)), transparent, var(--label-glass-tint), rgb(13 12 18 / 18%)),
+          linear-gradient(calc(180deg - atan2(100cqw, 100cqh)), rgb(247 245 250 / 28.9%), rgb(247 245 250 / 8.5%), transparent),
+          radial-gradient(circle 78cqmin at 22% 18%, rgb(247 245 250 / 40.8%), rgb(247 245 250 / 13.6%), transparent);
+        background-blend-mode: multiply, screen, screen;
+      }
+      .tiptap-editor .penned-label-glass-material::after {
+        content: ""; position: absolute; inset: 0; border-radius: inherit;
+        background: linear-gradient(to bottom, rgb(255 255 255 / 78%) 0%, rgb(255 255 255 / 46%) 8%,
+          rgb(255 255 255 / 18%) 22%, transparent 46% 65%, rgb(13 12 18 / 12%) 86%, rgb(13 12 18 / 34%) 100%);
+      }
+      .tiptap-editor .penned-label-grain {
+        --label-grain-mask: url("./label-grain-light.png");
+        position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+        background-color: var(--label-grain-flecks, var(--label-bg));
+        -webkit-mask: var(--label-grain-mask) 0 0 / 192px 192px repeat;
+        mask: var(--label-grain-mask) 0 0 / 192px 192px repeat;
+      }
+      .tiptap-editor [data-label-shape="framed"] .penned-label-grain {
+        clip-path: var(--label-plaque);
+      }
+      .tiptap-editor [data-label-style="outline"]:not([data-label-shape="framed"], [data-label-perimeter]) .penned-label-tile,
+      .tiptap-editor [data-label-style="outline"][data-label-shape="framed"] .penned-label-tile::before {
+        background: color-mix(in srgb, var(--label-bg) 8%, transparent);
+      }
+      .tiptap-editor [data-label-perimeter] .penned-label-tile {
+        --label-path-outset: calc(var(--label-border-width, 1px) / 2);
+        border: 0; border-radius: 0; background: none;
+        justify-content: center; text-align: center;
+        min-width: min(2.75em, calc(100% - 2 * var(--label-path-outset)));
+        max-width: calc(100% - 2 * var(--label-path-outset));
+        padding: .38em 1.35em;
+        margin: var(--label-path-outset);
+      }
+      .tiptap-editor [data-label-shape="scalloped"] .penned-label-tile {
+        padding: .58em 1.08em;
+      }
+      .tiptap-editor [data-label-shape="plaque"] .penned-label-tile {
+        min-width: min(6.8em, calc(100% - 2 * var(--label-path-outset)));
+        padding: .48em 1.55em;
+      }
+      .tiptap-editor [data-label-shape="banner"] .penned-label-tile {
+        min-width: min(10em, calc(100% - 2 * var(--label-path-outset)));
+        padding-block: .48em;
+      }
+      .tiptap-editor .penned-label-path-surface {
+        position: absolute; inset: 0; z-index: -1; isolation: isolate;
+        pointer-events: none; background: var(--label-grain-base, var(--label-bg));
+        clip-path: inset(0 round .34em);
+      }
+      .tiptap-editor [data-label-style="outline"] .penned-label-path-surface {
+        background: color-mix(in srgb, var(--label-bg) 8%, transparent);
+      }
+      .tiptap-editor .penned-label-path-frame {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        overflow: visible; pointer-events: none;
+        fill: none; stroke: var(--label-border); stroke-width: var(--label-border-width, 1px);
+      }
       .tiptap-editor :is(.vellix-caption, [data-vellix-caption]) { font-size: 12px !important; }
 
       .tiptap-editor p + :is(h1, h2, h3, h4, h5) {
@@ -265,8 +407,21 @@
         }
       }
 
-      .tiptap-editor ::selection {
+      .tiptap-editor ::selection,
+      .tiptap-editor .penned-link-held-selection {
         background: rgb(128 0 254 / 35%);
+      }
+
+      .tiptap-editor :is(.vellix-plain-callout-text, .vellix-callout-text)::selection,
+      .tiptap-editor :is(.vellix-plain-callout-text, .vellix-callout-text) ::selection {
+        background-color: #492477;
+        color: #ffffff;
+      }
+
+      .tiptap-editor :is(.vellix-plain-callout-text, .vellix-callout-text)::highlight(penned-callout-selection),
+      .tiptap-editor :is(.vellix-plain-callout-text, .vellix-callout-text) ::highlight(penned-callout-selection) {
+        background-color: #492477;
+        color: #ffffff;
       }
 
       /* WebKit reads the caret color from the root editing host on iOS. */
@@ -304,9 +459,7 @@
       }
 
 
-      .tiptap-editor .vellix-plain-callout {
-        --penned-callout-preview-width: initial; --penned-callout-width: initial;
-      }
+      .tiptap-editor .vellix-plain-callout { --penned-callout-width: initial; }
       .penned-callout-row {
         display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px;
         width: 100%; min-width: 0; --penned-callout-gap-share: 6px;
@@ -317,15 +470,36 @@
         max-width: 100%; margin-block: 0 !important;
       }
       .tiptap-editor .penned-callout-row-content > .vellix-plain-callout {
-        flex: 0 0 calc(var(--penned-callout-preview-width, var(--penned-callout-width, 100%)) - var(--penned-callout-gap-share));
+        flex: 0 0 calc(var(--penned-callout-width, 100%) - var(--penned-callout-gap-share) - var(--penned-callout-inset));
+        min-width: min(120px, var(--penned-callout-available-width));
         width: auto;
       }
-      .tiptap-editor .vellix-plain-callout:is([data-callout-width], .penned-callout-resizing):not(.penned-callout-row-content > *) {
-        width: var(--penned-callout-preview-width, var(--penned-callout-width, 100%)); max-width: 100%;
+      .tiptap-editor .vellix-plain-callout[data-callout-width]:not(.penned-callout-row-content > *) {
+        width: var(--penned-callout-width, 100%);
+      }
+      .tiptap-editor :is(.vellix-plain-callout, .penned-icon-callout, .penned-callout-row):not([data-vellix-indent]) {
+        --vellix-block-indent: 0px;
+      }
+      .tiptap-editor :is(.vellix-plain-callout, .penned-icon-callout, .penned-callout-row) {
+        --penned-callout-inset: var(--vellix-block-indent, 0px);
+        --penned-callout-available-width: max(0px, calc(100% - var(--penned-callout-inset)));
+        box-sizing: border-box;
+        margin-left: var(--penned-callout-inset);
+        max-width: var(--penned-callout-available-width);
+      }
+      .tiptap-editor .vellix-toggle-content > :is(.vellix-plain-callout, .penned-icon-callout, .penned-callout-row),
+      .tiptap-editor :is(.vellix-toggle-content > .penned-callout-row, .penned-callout-row[data-legacy-toggle-body]) > .penned-callout-row-content > .vellix-plain-callout:not([data-legacy-toggle-body]) {
+        --penned-callout-inset: max(0px, calc(var(--vellix-block-indent, 0px) - var(--vellix-indent-step)));
+      }
+      /* Legacy siblings sit outside the toggle's grid; give them its body inset. */
+      .tiptap-editor :is(.vellix-plain-callout, .penned-icon-callout, .penned-callout-row)[data-legacy-toggle-body] {
+        --penned-callout-inset: calc(var(--vellix-toggle-body-inset) + max(0px, calc(var(--vellix-block-indent, 0px) - var(--vellix-indent-step))));
+      }
+      .tiptap-editor .vellix-toggle-content > :is(.vellix-plain-callout:not([data-callout-width]), .penned-icon-callout, .penned-callout-row) {
+        width: var(--penned-callout-available-width);
       }
       .penned-callout-space { min-height: 44px; align-self: stretch; cursor: text; }
       .penned-callout-space[hidden] { display: none; }
-      .tiptap-editor[contenteditable="false"] .penned-callout-resizers { display: none; }
       .penned-callout-row .vellix-plain-callout-text { min-width: 0; overflow-wrap: anywhere; }
 
       .vellix-page-reference { min-width: 0; margin: 0; padding: 2px 0; }
@@ -756,6 +930,14 @@
         margin-top: 6px;
       }
 
+      /* Indented text must give up the space used by its margin. The shared
+         block rule otherwise sizes it to 100% and adds the indent on top. */
+      .tiptap-editor :is(.vellix-plain-callout-text, .vellix-callout-text) :is(p, h1, h2, h3, h4, h5, h6)[data-vellix-indent] {
+        box-sizing: border-box;
+        width: auto;
+        margin-left: min(var(--vellix-block-indent, 0px), 30%);
+      }
+
       .vellix-plain-callout {
         --vellix-callout-color: #ffffff;
         box-sizing: border-box;
@@ -772,7 +954,203 @@
       }
 
       .tiptap-editor .vellix-plain-callout { width: auto; }
-      .vellix-plain-callout-text { position: relative; width: 100%; }
+      .vellix-plain-callout-text { position: relative; flex: 1 1 0; min-width: 0; }
+      :is(.vellix-callout.penned-icon-callout, .vellix-plain-callout.penned-plain-callout) {
+        --vellix-primary-text: var(--penned-callout-text, var(--penned-grid-ink));
+        background: var(--penned-grid-bg);
+        color: var(--vellix-primary-text);
+        border: 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        width: auto;
+        min-height: 0;
+        padding: 10px 12px;
+      }
+      .vellix-plain-callout.penned-plain-callout { min-height: var(--penned-plain-callout-min-height, 0px); }
+      .penned-icon-callout > .vellix-callout-icon-button,
+      .penned-icon-callout > .vellix-callout-icon-button:hover {
+        flex: 0 0 32px;
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        padding: 0;
+        background: none;
+        border: 0;
+      }
+      .penned-icon-callout .vellix-callout-icon-image { inset: 2px; }
+      .penned-icon-callout-image {
+        display: block;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        border-radius: 0;
+        object-fit: contain;
+        border: 0;
+        pointer-events: none;
+      }
+      .penned-icon-callout-tint {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: var(--penned-callout-tint);
+        -webkit-mask: var(--penned-callout-mask) center / contain no-repeat;
+        mask: var(--penned-callout-mask) center / contain no-repeat;
+        mask-mode: alpha;
+        pointer-events: none;
+      }
+      .penned-icon-callout-tint > img { opacity: 0; }
+      :is(.penned-icon-callout, .penned-plain-callout) > .vellix-callout-text {
+        min-width: 0;
+        flex: 1 1 0;
+        padding: 2px 0;
+        color: inherit;
+        overflow-wrap: anywhere;
+      }
+
+      :where(.tiptap-editor, .tiptap-editor *):not(.penned-callout-row-content):has(> :is(.penned-grid-card[data-grid-width="half"], .penned-rich-link[data-link-layout="card"], .penned-plain-callout[data-callout-width="50"])) {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 12px;
+        align-items: start;
+      }
+      :where(.tiptap-editor, .tiptap-editor *):not(.penned-callout-row-content):has(> :is(.penned-grid-card[data-grid-width="half"], .penned-rich-link[data-link-layout="card"], .penned-plain-callout[data-callout-width="50"])) > * {
+        grid-column: 1 / -1;
+      }
+      .tiptap-editor :is(.penned-grid-card[data-grid-width="half"], .penned-rich-link[data-link-layout="card"], .penned-plain-callout[data-callout-width="50"]) {
+        grid-column: auto;
+      }
+      /* Each family pairs only with consecutive cards of the same kind. */
+      .tiptap-editor .penned-plain-callout[data-callout-width="50"]:not(.penned-callout-row-content > *) {
+        width: var(--penned-callout-available-width);
+      }
+      .tiptap-editor :not(.penned-plain-callout[data-callout-width="50"]) + .penned-plain-callout[data-callout-width="50"] { grid-column: 1; }
+      .tiptap-editor :not(.penned-grid-card[data-grid-width="half"]) + .penned-grid-card[data-grid-width="half"],
+      .tiptap-editor :not(.penned-rich-link[data-link-layout="card"]) + .penned-rich-link[data-link-layout="card"] {
+        grid-column: 1;
+      }
+      :is(.tiptap-editor, .tiptap-editor *):has(> :is(.penned-grid-card[data-grid-width="half"], .penned-rich-link[data-link-layout="card"], .penned-plain-callout[data-callout-width="50"])) > .vellix-page-reference.vellix-page-card-inline {
+        grid-column: auto;
+        width: 100%;
+        margin-inline-end: 0;
+      }
+      :is(.tiptap-editor, .tiptap-editor *):has(> :is(.penned-grid-card[data-grid-width="half"], .penned-rich-link[data-link-layout="card"], .penned-plain-callout[data-callout-width="50"])) > .vellix-page-card-inline.vellix-page-card-row-start {
+        grid-column: 1;
+      }
+      .tiptap-editor.penned-mobile-block-layout > .vellix-callout.penned-grid-card[data-grid-width="half"] {
+        margin-top: var(--penned-block-gap, 10px) !important;
+      }
+      .tiptap-editor.penned-mobile-block-layout > .vellix-callout.penned-grid-card[data-grid-width="half"]:first-child,
+      .tiptap-editor.penned-mobile-block-layout > .penned-grid-card[data-grid-width="half"]:first-child + .vellix-callout.penned-grid-card[data-grid-width="half"] {
+        margin-top: 0 !important;
+      }
+      .penned-rich-link {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+        margin: 6px 0;
+        border: 1px solid rgba(var(--vellix-neutral-rgb), 0.18);
+        border-radius: 6px;
+        background: rgba(var(--vellix-neutral-rgb), 0.035);
+      }
+      .tiptap-editor .penned-rich-link { margin-inline: 0; }
+      .penned-mobile-block-layout > .penned-rich-link[data-link-layout="card"]:first-child + .penned-rich-link[data-link-layout="card"],
+      .penned-mobile-block-layout :is(.vellix-toggle-content, .vellix-blockquote-content, li) > .penned-rich-link[data-link-layout="card"]:first-child + .penned-rich-link[data-link-layout="card"] {
+        margin-top: 0 !important;
+      }
+      .penned-rich-link > a.penned-rich-link-preview {
+        display: block;
+        color: var(--vellix-primary-text);
+        border-radius: inherit;
+        overflow: hidden;
+        text-decoration: none;
+      }
+      .penned-rich-link-main { display: flex; min-height: 46px; }
+      .penned-rich-link-image {
+        display: block;
+        flex: 0 0 84px;
+        width: 84px;
+        height: 46px;
+        object-fit: cover;
+        background: rgba(var(--vellix-neutral-rgb), 0.08);
+      }
+      .penned-rich-link-image.penned-rich-link-favicon-only { object-fit: contain; padding: 9px; }
+      .penned-rich-link-copy { min-width: 0; padding: 6px 10px; align-self: center; }
+      .penned-rich-link-title, .penned-rich-link-description, .penned-rich-link-site > span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .penned-rich-link-title { font-size: 13px; font-weight: 600; line-height: 1.25; }
+      .penned-rich-link-description { font-size: 11px; line-height: 1.3; opacity: 0.67; margin-top: 3px; }
+      .penned-rich-link-site {
+        min-height: 20px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 5px;
+        border-top: 1px solid rgba(var(--vellix-neutral-rgb), 0.1);
+        font-size: 9px;
+        line-height: 1.2;
+        color: var(--vellix-secondary-text);
+      }
+      .penned-rich-link-favicon { width: 14px; height: 14px; flex: 0 0 14px; object-fit: contain; border-radius: 3px; }
+      .penned-rich-link[data-link-layout="small"] .penned-rich-link-main { min-height: 28px; }
+      .penned-rich-link[data-link-layout="small"] .penned-rich-link-image { flex-basis: 50px; width: 50px; height: 28px; }
+      .penned-rich-link[data-link-layout="small"] .penned-rich-link-copy { padding-block: 0; }
+      .penned-rich-link[data-link-layout="small"] :is(.penned-rich-link-description, .penned-rich-link-site) { display: none; }
+      .penned-rich-link[data-link-layout="card"] .penned-rich-link-main { display: block; }
+      .penned-rich-link[data-link-layout="card"] .penned-rich-link-image { width: 100%; height: auto; aspect-ratio: 2 / 1; }
+      .penned-rich-link[data-link-layout="card"] .penned-rich-link-description {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .vellix-callout.penned-grid-card {
+        --vellix-primary-text: var(--penned-grid-ink);
+        display: block;
+        width: 100%;
+        min-width: 0;
+        min-height: var(--penned-grid-height);
+        margin: 5px 0;
+        padding: 14px;
+        border: 0;
+        background: var(--penned-grid-bg);
+        color: var(--penned-grid-ink);
+      }
+      .penned-grid-card-header {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        margin-bottom: 7px;
+      }
+      .penned-grid-card[data-grid-alignment="center"] > .penned-grid-card-header { align-items: center; text-align: center; }
+      .penned-grid-card[data-grid-alignment="right"] > .penned-grid-card-header { align-items: flex-end; text-align: right; }
+      .penned-grid-card .vellix-callout-icon-button,
+      .penned-grid-card .vellix-callout-icon-button:hover {
+        background: none;
+        border-radius: 0;
+        width: 28px;
+        height: 28px;
+        margin: 0;
+        padding: 0;
+      }
+      .penned-grid-card .vellix-callout-icon-image { inset: 0; }
+      .penned-grid-card-title {
+        font-size: 1.25em;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .penned-grid-card-title:empty { display: none; }
+      .penned-grid-card > .vellix-callout-text { padding: 0; color: var(--penned-grid-ink); }
+      [data-grid-card-preview] .vellix-editor-page { max-width: none; }
+      [data-grid-card-preview] .vellix-callout.penned-grid-card { margin: 0; }
 
       /* Let guidance size itself; a stale estimated paragraph height pushes it to the top. */
       .vellix-plain-callout-text .vellix-guided-empty {
@@ -784,17 +1162,6 @@
         width: 100%;
         height: auto;
         margin-right: -100%;
-      }
-
-      .vellix-plain-callout-color-button {
-        position: absolute;
-        inset: 0;
-        margin: 0;
-        padding: 0;
-        border: 0;
-        border-radius: inherit;
-        background: transparent;
-        cursor: pointer;
       }
 
       .vellix-plain-callout.penned-clip-source {
@@ -1024,14 +1391,24 @@
         -webkit-mask-size: contain; -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
       }
       .tiptap-editor [data-vellix-divider] {
+        --penned-divider-inset: var(--vellix-divider-indent, 0px);
         display: flex;
         justify-content: center;
         align-items: center;
-        width: 100%;
+        width: max(0px, calc(100% - var(--penned-divider-inset)));
         min-height: 30px !important;
         margin: 4px 0 !important;
+        margin-inline-start: var(--penned-divider-inset) !important;
         border: 0 !important;
-        color: var(--vellix-primary-text) !important;
+        color: var(--vellix-divider-color, var(--vellix-primary-text)) !important;
+      }
+
+      /* The toggle body already supplies the first level of indentation. */
+      .tiptap-editor .vellix-toggle-content > [data-vellix-divider] {
+        --penned-divider-inset: max(0px, calc(var(--vellix-divider-indent, 0px) - var(--vellix-indent-step)));
+      }
+      .tiptap-editor [data-vellix-divider][data-legacy-toggle-body] {
+        --penned-divider-inset: calc(var(--vellix-toggle-body-inset) + max(0px, calc(var(--vellix-divider-indent, 0px) - var(--vellix-indent-step))));
       }
 
       .tiptap-editor .vellix-divider-line {
@@ -1055,10 +1432,10 @@
       .tiptap-editor .vellix-divider-dots {
         display: block;
         width: 100%;
-        height: 1px;
+        height: 2px;
         color: color-mix(in srgb, currentColor 55%, transparent);
-        background-image: radial-gradient(circle at 0.5px 0.5px, currentColor 0.5px, transparent 0.5px);
-        background-size: 5px 1px;
+        background-image: radial-gradient(circle at 1px 1px, currentColor 1px, transparent 1px);
+        background-size: 5px 2px;
         background-repeat: repeat-x;
       }
 
@@ -1076,6 +1453,67 @@
         flex: 0 0 4px;
         border-radius: 50%;
         background: currentColor;
+      }
+
+      .tiptap-editor [data-divider-color] .vellix-divider-line {
+        background: var(--vellix-divider-color);
+      }
+
+      .tiptap-editor [data-divider-color] .vellix-divider-dots {
+        color: var(--vellix-divider-color);
+      }
+
+      .tiptap-editor [data-divider-style="washiTape"] {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 3px;
+      }
+
+      .tiptap-editor .vellix-divider-tape {
+        display: block;
+        position: relative;
+        width: 100%;
+        aspect-ratio: 5;
+        min-height: 26px;
+        max-height: 72px;
+        background: var(--vellix-divider-color, color-mix(in srgb, currentColor 12%, transparent));
+        clip-path: polygon(0 0, 100% 0, calc(100% - 6px) 10%, 100% 20%, calc(100% - 6px) 30%,
+          100% 40%, calc(100% - 6px) 50%, 100% 60%, calc(100% - 6px) 70%, 100% 80%,
+          calc(100% - 6px) 90%, 100% 100%, 0 100%, 6px 90%, 0 80%, 6px 70%, 0 60%,
+          6px 50%, 0 40%, 6px 30%, 0 20%, 6px 10%);
+      }
+
+      .tiptap-editor [data-tape-size="thin"] .vellix-divider-tape {
+        aspect-ratio: 20 / 3;
+        min-height: 19.5px;
+        max-height: 54px;
+      }
+
+      .tiptap-editor[contenteditable="true"] .vellix-divider-tape { cursor: pointer; }
+
+      .tiptap-editor .vellix-divider-tape img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        pointer-events: none;
+      }
+
+      .tiptap-editor [data-divider-color] .vellix-divider-tape[data-tape-image]::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--vellix-divider-color);
+        opacity: 0.38;
+        pointer-events: none;
+      }
+
+      .tiptap-editor .vellix-divider-credit {
+        font-size: 10px;
+        color: var(--vellix-primary-text);
+        opacity: 0.72;
+        text-align: right;
       }
 
       /* The pageBreak node is only a transparent structural boundary.
@@ -1132,12 +1570,37 @@
         margin-top: 20px;
       }
 
+      /* Keep page-edge spacing outside the Rich Link border, including on mobile. */
+      .tiptap-editor.ProseMirror > .penned-rich-link:has(+ :is([data-vellix-page-break], [data-type="pageBreak"], [data-page-break])) {
+        padding-bottom: 0 !important;
+        margin-bottom: 20px !important;
+      }
+
+      /* A paired Card can be shorter than its neighbor. Space the page break
+         from the entire grid row, not from the shorter Card's border. */
+      .tiptap-editor.ProseMirror > .penned-rich-link[data-link-layout="card"]:has(+ :is([data-vellix-page-break], [data-type="pageBreak"], [data-page-break])) {
+        margin-bottom: 0 !important;
+      }
+
+      .tiptap-editor.ProseMirror > .penned-rich-link[data-link-layout="card"] + :is([data-vellix-page-break], [data-type="pageBreak"], [data-page-break]) {
+        margin-top: 20px !important;
+      }
+
+      .tiptap-editor.ProseMirror > :is([data-vellix-page-break], [data-type="pageBreak"], [data-page-break]) + .penned-rich-link {
+        padding-top: 0 !important;
+        margin-top: 20px !important;
+      }
+
+      .tiptap-editor.ProseMirror > :is([data-vellix-page-break], [data-type="pageBreak"], [data-page-break]) + .penned-rich-link[data-link-layout="card"] + .penned-rich-link[data-link-layout="card"] {
+        margin-top: 20px !important;
+      }
+
       .tiptap-editor [data-vellix-toggle] {
         position: relative;
         display: grid;
-        grid-template-columns: 28px minmax(0, 1fr);
+        grid-template-columns: var(--vellix-toggle-marker-width) minmax(0, 1fr);
         align-items: start;
-        column-gap: 8px;
+        column-gap: var(--vellix-toggle-column-gap);
         margin: 10px 0;
         padding: 2px 0;
         min-height: 32px;
@@ -1188,8 +1651,7 @@
       :root[data-penned-document-scheme="light"] .tiptap-editor .vellix-toggle-button::before {
         background-image: none;
         background-color: var(--vellix-primary-text);
-        mask-image: var(--vellix-asset-chevright, var(--vellix-icon-chevright));
-        -webkit-mask-image: var(--vellix-asset-chevright, var(--vellix-icon-chevright));
+        transform: translateX(-2px) rotate(-45deg);
         mask-size: contain;
         -webkit-mask-size: contain;
         mask-repeat: no-repeat;
@@ -1220,8 +1682,9 @@
         margin-bottom: 0 !important;
       }
 
-      .tiptap-editor [data-vellix-toggle][data-open="false"] > .vellix-toggle-content > :not(:first-child) {
-        display: none;
+      .tiptap-editor [data-vellix-toggle][data-open="false"] > .vellix-toggle-content > :not(:first-child),
+      .tiptap-editor [data-legacy-toggle-body="closed"] {
+        display: none !important;
       }
 
       .tiptap-editor pre {
@@ -1275,7 +1738,7 @@
         padding-left: 3px;
       }
 
-      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-line {
+      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"]:not([data-divider-color]) .vellix-divider-line {
         background: linear-gradient(
           90deg,
           transparent,
@@ -1293,11 +1756,6 @@
 
       .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-divider-style="thickLine"][data-vellix-selected="true"] .vellix-divider-line {
         height: 8px;
-      }
-
-      .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-dots {
-        color: color-mix(in srgb, var(--vellix-primary-text) 58%, transparent);
-        filter: drop-shadow(0 0 4px color-mix(in srgb, var(--vellix-primary-text) 18%, transparent));
       }
 
       .vellix-selection-mode .tiptap-editor [data-vellix-selection-node-type="divider"][data-vellix-selected="true"] .vellix-divider-circle {
@@ -1509,11 +1967,6 @@
         overflow: hidden;
         -webkit-touch-callout: none;
       }
-      html:not(.vellix-selection-mode) .tiptap-editor .penned-list-grid[data-list-grid-touch-pending],
-      html:not(.vellix-selection-mode) .tiptap-editor .penned-list-grid[data-list-grid-touch-pending] * {
-        -webkit-user-select: none !important;
-        user-select: none !important;
-      }
       .penned-list-grid-row {
         display: grid;
         grid-template-columns: minmax(0, var(--lg-left-fraction, 34fr)) minmax(0, var(--lg-right-fraction, 66fr));
@@ -1557,6 +2010,368 @@
         min-width: 0;
       }
       .penned-list-grid.ProseMirror-selectednode {
+        outline: 2px solid #a970ff;
+        outline-offset: 2px;
+      }
+
+      /* ===== Tabbed content block ===================================== */
+      .penned-tabs {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        margin: var(--pt-outer, 8px) 0;
+      }
+      /* Contained style: the outer card. */
+      .penned-tabs[data-pt-container="true"] {
+        background: var(--pt-container-bg, #111113);
+        border: var(--pt-border-width, 1px) solid var(--pt-container-border, #2a2a2e);
+        border-radius: var(--pt-corner, 16px);
+        padding: var(--pt-padding, 14px);
+      }
+      .penned-tabs[data-pt-container="true"][data-pt-shadow="true"] {
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+      }
+      /* Containerless style: no card chrome at all. */
+      .penned-tabs[data-pt-container="false"] {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+      }
+      .tiptap-editor .penned-tabs-bar,
+      .tiptap-editor .penned-tabs-header {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .tiptap-editor .penned-tabs-bar .penned-tab { touch-action: manipulation; }
+
+      /* Optional block header (independent of the container). */
+      .penned-tabs-header { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      .penned-tabs[data-pt-header="false"] .penned-tabs-header { display: none; }
+      .penned-tabs-header-icon {
+        display: inline-block;
+        width: 24px; height: 24px; flex: 0 0 24px;
+        background: var(--pt-indicator, #7c5cff);
+        mask-size: contain; mask-repeat: no-repeat; mask-position: center;
+        -webkit-mask-size: contain; -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
+      }
+      .penned-tabs-header-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .penned-tabs-title { color: var(--pt-title-color, #ffffff); font-weight: 800; font-size: 20px; line-height: 1.15; overflow-wrap: anywhere; }
+      .penned-tabs-subtitle { color: var(--pt-subtitle-color, #9a9aa0); font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
+
+      /* Tab bar: wraps instead of scrolling so it always fits the doc width. */
+      .penned-tabs-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--pt-tab-spacing, 8px);
+        min-width: 0;
+      }
+      .penned-tabs[data-pt-align="center"] .penned-tabs-bar { justify-content: center; }
+      .penned-tabs[data-pt-align="trailing"] .penned-tabs-bar { justify-content: flex-end; }
+
+      .penned-tab {
+        appearance: none; -webkit-appearance: none;
+        border: 0; margin: 0; cursor: pointer;
+        font: inherit; font-weight: 600; font-size: 15px; line-height: 1.1;
+        padding: 9px 16px;
+        border-radius: var(--pt-tab-corner, 10px);
+        max-width: 100%;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        background: transparent;
+        color: var(--pt-inactive-text, #9a9aa0);
+        transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      }
+      /* Filled: every tab is a pill; the active pill is tinted. */
+      .penned-tabs[data-pt-style="filled"] .penned-tab { background: var(--pt-inactive-bg, #1c1c1e); }
+      .penned-tabs[data-pt-style="filled"] .penned-tab[data-active] {
+        background: var(--pt-active-bg, #3a3a3c);
+        color: var(--pt-active-text, #ffffff);
+      }
+      /* Segmented: one rounded track holding equal-width segments. */
+      .penned-tabs[data-pt-style="segmented"] .penned-tabs-bar {
+        background: var(--pt-inactive-bg, #1c1c1e);
+        border-radius: calc(var(--pt-tab-corner, 10px) + 4px);
+        padding: 4px; gap: 4px;
+        flex-wrap: nowrap;
+      }
+      .penned-tabs[data-pt-style="segmented"] .penned-tab { flex: 1 1 0; background: transparent; }
+      .penned-tabs[data-pt-style="segmented"] .penned-tab[data-active] {
+        background: var(--pt-active-bg, #3a3a3c);
+        color: var(--pt-active-text, #ffffff);
+      }
+      /* Underlined: text tabs with an active underline in the indicator color. */
+      .penned-tabs[data-pt-style="underlined"] .penned-tab {
+        background: transparent; border-radius: 0;
+        padding: 8px 10px; border-bottom: 2px solid transparent;
+      }
+      .penned-tabs[data-pt-style="underlined"] .penned-tab[data-active] {
+        color: var(--pt-active-text, #ffffff);
+        border-bottom-color: var(--pt-indicator, #7c5cff);
+      }
+      /* Minimal: plain text, a short indicator dash under the active tab. */
+      .penned-tabs[data-pt-style="minimal"] .penned-tab { background: transparent; padding: 6px 8px; }
+      .penned-tabs[data-pt-style="minimal"] .penned-tab[data-active] { color: var(--pt-active-text, #ffffff); }
+      .penned-tabs[data-pt-style="minimal"] .penned-tab[data-active]::after {
+        content: ""; display: block; height: 2px; margin-top: 3px;
+        border-radius: 2px; background: var(--pt-indicator, #7c5cff);
+      }
+
+      /* Optional divider between the bar and the panel content. */
+      .penned-tabs[data-pt-divider="true"] .penned-tabs-bar {
+        border-bottom: 1px solid var(--pt-container-border, #2a2a2e);
+        padding-bottom: 10px;
+      }
+      .penned-tabs[data-pt-style="segmented"][data-pt-divider="true"] .penned-tabs-bar {
+        border-bottom: 0; padding-bottom: 4px;
+      }
+
+      /* Panels: exactly one is shown; the node view marks it `data-active`. */
+      .penned-tab-panels { min-width: 0; position: relative; }
+      /* Keep inactive ProseMirror content mounted and measurable by WebKit.
+         display:none on editable descendants can invalidate native selection/layout. */
+      .penned-tab-panel { position: absolute; visibility: hidden; pointer-events: none; min-width: 0; width: 100%; }
+      .penned-tab-panel[data-active] { position: relative; visibility: visible; pointer-events: auto; }
+      /* Fallback before the view resolves the active panel, so the content
+         area never collapses to zero height. */
+      .penned-tab-panels:not(:has(.penned-tab-panel[data-active])) > .penned-tab-panel:first-child {
+        position: relative;
+        visibility: visible;
+        pointer-events: auto;
+      }
+      .penned-tab-panel > *:first-child { margin-top: 0; }
+      .penned-tab-panel > *:last-child { margin-bottom: 0; }
+      /* A newly inserted Fields block can follow the panel's starter empty
+         paragraph. Keep that paragraph in the document for ProseMirror, but
+         collapse its visual footprint so the first record sits close to the
+         tab bar divider instead of below an empty line. */
+      .penned-tab-panel > p:has(> br.ProseMirror-trailingBreak):has(+ .penned-minimal-fields) {
+        height: 0;
+        min-height: 0;
+        line-height: 0;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      .penned-tab-panel > .penned-minimal-fields:first-child,
+      .penned-tab-panel > p:has(> br.ProseMirror-trailingBreak) + .penned-minimal-fields {
+        margin-top: 0;
+      }
+
+      .penned-tabs.ProseMirror-selectednode {
+        outline: 2px solid #a970ff;
+        outline-offset: 2px;
+      }
+
+      /* ===== Minimal Fields block ==================================== */
+      .penned-information-card {
+        box-sizing: border-box; width: 100%; min-width: 0;
+        padding: var(--ic-padding, 16px);
+        border-radius: var(--ic-radius, 16px);
+        background: var(--ic-bg, #202024);
+        border: var(--ic-border-width, 1px) solid var(--ic-border, #393940);
+        margin: 8px 0;
+      }
+      .penned-information-card-title {
+        font-weight: 800; font-size: 19px; line-height: 1.3;
+        color: var(--ic-title, #fff); overflow-wrap: anywhere;
+      }
+      .penned-information-card[data-ic-collapsible="true"]:has(> .penned-information-card-disclosure) {
+        position: relative;
+      }
+      .penned-information-card[data-ic-collapsible="true"] > .penned-information-card-content > .penned-information-card-title {
+        padding-inline-end: 36px;
+      }
+      .penned-information-card-disclosure {
+        position: absolute;
+        inset-block-start: max(0px, calc(var(--ic-padding, 16px) - 10px));
+        inset-inline-end: max(0px, calc(var(--ic-padding, 16px) - 10px));
+        inline-size: 44px;
+        block-size: 44px;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--ic-title, #fff);
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        --ic-disclosure-mask: var(--vellix-asset-chevup, url("vellix-icon://asset/chevup?tint=%23FFFFFF&size=24"));
+      }
+      .penned-information-card-disclosure[hidden] { display: none; }
+      .penned-information-card-disclosure[aria-expanded="false"] {
+        --ic-disclosure-mask: var(--vellix-asset-chevdown, url("vellix-icon://asset/chevdown?tint=%23FFFFFF&size=24"));
+      }
+      .penned-information-card-disclosure::before {
+        content: "";
+        inline-size: 18px;
+        block-size: 18px;
+        background-color: currentColor;
+        -webkit-mask: var(--ic-disclosure-mask) center / contain no-repeat;
+        mask: var(--ic-disclosure-mask) center / contain no-repeat;
+      }
+      .vellix-selection-mode .penned-information-card-disclosure { pointer-events: none; }
+      .penned-information-card[data-ic-collapsed="true"] > .penned-information-card-content > .penned-information-card-body {
+        display: none;
+      }
+      .penned-information-card-description {
+        color: var(--ic-text, #e4e4ea); opacity: .72;
+        font-size: 14px; line-height: 1.4; margin-top: 6px;
+        overflow-wrap: anywhere;
+      }
+      .penned-information-card-body {
+        color: var(--ic-text, #e4e4ea);
+        border-top: 1px solid var(--ic-divider, #393940);
+        padding-top: 14px;
+        margin-top: 14px;
+        min-width: 0;
+      }
+      .penned-information-card-body > * { color: var(--ic-text, #e4e4ea); }
+      .penned-information-card-body > p { margin: 0 0 6px; }
+      .penned-information-card[data-ic-show-labels="false"] .penned-information-card-body > p:first-child { display: none; }
+      .penned-information-card-body > *:last-child { margin-bottom: 0; }
+      .penned-information-card[data-ic-hide-title="true"] > .penned-information-card-title,
+      .penned-information-card[data-ic-hide-title="true"] > .penned-information-card-content > .penned-information-card-title,
+      .penned-information-card[data-ic-hide-description="true"] > .penned-information-card-description,
+      .penned-information-card[data-ic-hide-description="true"] > .penned-information-card-content > .penned-information-card-description { display: none; }
+      .penned-information-card[data-ic-hide-title="true"] > .penned-information-card-description,
+      .penned-information-card[data-ic-hide-title="true"] > .penned-information-card-content > .penned-information-card-description { margin-top: 0; }
+      .penned-information-card[data-ic-hide-divider="true"] > .penned-information-card-body,
+      .penned-information-card[data-ic-hide-divider="true"] > .penned-information-card-content > .penned-information-card-body { border-top: 0; padding-top: 0; }
+      .penned-information-card[data-ic-hide-title="true"][data-ic-hide-description="true"] > .penned-information-card-body,
+      .penned-information-card[data-ic-hide-title="true"][data-ic-hide-description="true"] > .penned-information-card-content > .penned-information-card-body { margin-top: 0; }
+      .penned-information-card[data-ic-hide-title="true"][data-ic-collapsible="true"] > .penned-information-card-content > .penned-information-card-description { padding-inline-end: 36px; }
+      .penned-information-card[data-ic-hide-title="true"][data-ic-hide-description="true"][data-ic-collapsible="true"] { min-height: max(44px, calc(2 * var(--ic-padding, 16px) + 20px)); }
+      .penned-information-card[data-ic-hide-title="true"][data-ic-hide-description="true"][data-ic-collapsible="true"] > .penned-information-card-content { padding-top: 24px; }
+      .penned-minimal-fields {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        margin: var(--mf-outer, 8px) 0;
+      }
+      /* Each record carries a thin vertical accent rail on its left. No cards,
+         no container chrome — just the rail, the text, and optional dividers. */
+      .penned-minimal-record {
+        position: relative;
+        box-sizing: border-box;
+        min-width: 0;
+        padding-left: 34px;
+      }
+      .penned-minimal-record::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 2px; bottom: 2px;
+        width: var(--mf-accent-width, 3px);
+        background: var(--mf-accent, #7c5cff);
+        border-radius: var(--mf-accent-width, 3px);
+      }
+      .penned-minimal-record-content { min-width: 0; }
+      /* Collapse chevron, seated in the left gutter and aligned to the title. */
+      .penned-minimal-collapse {
+        position: absolute;
+        left: 8px;
+        /* Align the icon's center to the first title line's center.
+           The title uses line-height 1.2, including when its size changes. */
+        top: calc(var(--mf-title-size, 20px) * 0.6);
+        transform: translateY(-50%);
+        height: 24px;
+        width: 22px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0; margin: 0; border: 0;
+        background: transparent;
+        color: var(--mf-title-color, #ffffff);
+        opacity: 0.6;
+        cursor: pointer;
+        -webkit-user-select: none; user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      .penned-minimal-collapse::before {
+        content: "";
+        display: block;
+        width: 16px;
+        height: 16px;
+        background: var(--mf-title-color, #ffffff);
+        mask: var(--vellix-asset-chevdown, var(--vellix-icon-chevdown)) center / contain no-repeat;
+        -webkit-mask: var(--vellix-asset-chevdown, var(--vellix-icon-chevdown)) center / contain no-repeat;
+      }
+      .penned-minimal-record[data-collapsed] .penned-minimal-collapse::before {
+        mask-image: var(--vellix-asset-chevright, var(--vellix-icon-chevright));
+        -webkit-mask-image: var(--vellix-asset-chevright, var(--vellix-icon-chevright));
+      }
+      .penned-minimal-record[data-collapsed] .penned-minimal-field { display: none; }
+      /* Use one real gap between records. The previous margin+padding
+         combination made the divider's coordinate system misleading. */
+      .penned-minimal-fields[data-mf-divider="true"] .penned-minimal-record + .penned-minimal-record {
+        margin-top: calc(2 * var(--mf-record-gap, 18px));
+        padding-top: 0;
+      }
+      /* Place the separator at the actual midpoint of that gap. */
+      .penned-minimal-fields[data-mf-divider="true"] .penned-minimal-record + .penned-minimal-record::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(-1 * var(--mf-record-gap, 18px));
+        height: 1px;
+        background: var(--mf-divider, #2a2a2e);
+        pointer-events: none;
+      }
+      .penned-minimal-fields[data-mf-divider="false"] .penned-minimal-record + .penned-minimal-record {
+        margin-top: var(--mf-record-gap, 18px);
+      }
+      .penned-minimal-title {
+        color: var(--mf-title-color, #ffffff);
+        font-weight: 800;
+        font-size: var(--mf-title-size, 20px);
+        line-height: 1.2;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      /* Untitled Fields mode: hide the header and chevron, keep every value visible.
+         The title remains in the document so switching modes restores it. */
+      .penned-minimal-fields[data-mf-titles="false"] .penned-minimal-title,
+      .penned-minimal-fields[data-mf-titles="false"] .penned-minimal-collapse { display: none; }
+      .penned-minimal-fields[data-mf-titles="false"] .penned-minimal-record[data-collapsed] .penned-minimal-field { display: block; }
+      .penned-minimal-fields[data-mf-titles="false"] .penned-minimal-title + .penned-minimal-field { margin-top: 0; }
+      .penned-minimal-field { margin-top: var(--mf-field-gap, 12px); min-width: 0; }
+      .penned-minimal-label {
+        color: var(--mf-label-color, #b98cff);
+        font-weight: 700;
+        font-size: var(--mf-label-size, 12px);
+        line-height: 1.3;
+        letter-spacing: 0.04em;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .penned-minimal-fields[data-mf-uppercase="true"] .penned-minimal-label { text-transform: uppercase; }
+      .penned-minimal-value {
+        color: var(--mf-value-color, #e4e4ea);
+        font-size: var(--mf-value-size, 15px);
+        line-height: 1.4;
+        margin-top: 2px;
+        min-width: 0;
+      }
+      .tiptap-editor .penned-minimal-value > p {
+        color: var(--mf-value-color, #e4e4ea);
+        font-size: var(--mf-value-size, 15px);
+        margin: 0;
+        min-width: 0;
+      }
+      .penned-minimal-value > *:first-child { margin-top: 0; }
+      .penned-minimal-value > *:last-child { margin-bottom: 0; }
+      .penned-minimal-fields.ProseMirror-selectednode {
         outline: 2px solid #a970ff;
         outline-offset: 2px;
       }
@@ -1712,11 +2527,71 @@
       @keyframes penned-tag-arrival { 0%,35% { background-color: rgba(181,154,217,.22); } 100% { background-color: transparent; } }
       @media (prefers-reduced-motion: reduce) { .penned-tag-destination { animation-timing-function: step-end; } }
     </style>
+    <style>
+      /* Code blocks and their token spans must not inherit the document font. */
+      .tiptap-editor .penned-code-viewer,
+      .tiptap-editor .penned-code-viewer * {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+      }
+      .tiptap-editor .penned-code-viewer {
+        --penned-code-background: var(--penned-code-background-dark);
+        --penned-code-text: var(--penned-code-text-dark);
+        --penned-code-gutter: var(--penned-code-gutter-dark);
+        --penned-code-lineNumber: var(--penned-code-lineNumber-dark);
+        --penned-code-selection: var(--penned-code-selection-dark);
+        --penned-code-keyword: var(--penned-code-keyword-dark);
+        --penned-code-string: var(--penned-code-string-dark);
+        --penned-code-comment: var(--penned-code-comment-dark);
+        --penned-code-number: var(--penned-code-number-dark);
+        --penned-code-type: var(--penned-code-type-dark);
+        --penned-code-function: var(--penned-code-function-dark);
+        --penned-code-variable: var(--penned-code-variable-dark);
+        --penned-code-operator: var(--penned-code-operator-dark);
+        min-width: 0; max-width: 100%; max-height: 580px;
+        overflow-x: hidden; overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-block: 9px; margin: 12px 0;
+        box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--penned-code-text) 13%, transparent);
+        border-radius: 8px; background: var(--penned-code-background); color: var(--penned-code-text);
+        background-image: linear-gradient(to right, var(--penned-code-gutter) var(--penned-code-gutter-width), transparent 0);
+        font-size: 13px;
+        line-height: 1.55;
+        font-variant-ligatures: none;
+        tab-size: 4; cursor: pointer;
+      }
+      :root[data-penned-interface-scheme="light"] .tiptap-editor .penned-code-viewer {
+        --penned-code-background: var(--penned-code-background-light);
+        --penned-code-text: var(--penned-code-text-light);
+        --penned-code-gutter: var(--penned-code-gutter-light);
+        --penned-code-lineNumber: var(--penned-code-lineNumber-light);
+        --penned-code-selection: var(--penned-code-selection-light);
+        --penned-code-keyword: var(--penned-code-keyword-light);
+        --penned-code-string: var(--penned-code-string-light);
+        --penned-code-comment: var(--penned-code-comment-light);
+        --penned-code-number: var(--penned-code-number-light);
+        --penned-code-type: var(--penned-code-type-light);
+        --penned-code-function: var(--penned-code-function-light);
+        --penned-code-variable: var(--penned-code-variable-light);
+        --penned-code-operator: var(--penned-code-operator-light);
+      }
+      .penned-code-line {
+        display: grid; grid-template-columns: var(--penned-code-gutter-width) minmax(0, 1fr);
+        min-height: 1lh;
+      }
+      .penned-code-number {
+        color: var(--penned-code-lineNumber); text-align: right; padding-inline-end: .75ch;
+        border-inline-end: 1px solid color-mix(in srgb, var(--penned-code-text) 8%, transparent);
+        user-select: none;
+      }
+      .penned-code-text { padding-inline: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .penned-code-viewer:focus-visible { outline: 2px solid #a970ff; outline-offset: 2px; }
+    </style>
     <link rel="stylesheet" href="./vellix-tables.css" />
     <script src="./vendor/formula-parser.min.js"></script>
     <script src="./table-formulas.js"></script>
     <script src="./vellix-tables.js"></script>
     <script src="./vendor/table-library.js"></script>
+    <script src="./code-syntax.js"></script>
     <script src="./tiptap.bundle.js"></script>
   </body>
 </html>

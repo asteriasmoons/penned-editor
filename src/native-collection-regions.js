@@ -1,7 +1,7 @@
-export function nativeCollectionRegions(root) {
+export function nativeCollectionRegions(root, elements = root?.querySelectorAll("[data-native-collection]")) {
   if (!root) return [];
   const origin = root.getBoundingClientRect();
-  return Array.from(root.querySelectorAll("[data-native-collection]"))
+  return Array.from(elements)
     .filter(element => {
       const style = window.getComputedStyle(element);
       return element.dataset.nativeCollectionBlock && style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;

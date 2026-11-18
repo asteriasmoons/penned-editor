@@ -1,5 +1,5 @@
 import esbuild from "esbuild";
-import { copyFile, mkdir, rm, cp } from "node:fs/promises";
+import { copyFile, mkdir, rm, cp, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,8 +8,8 @@ const dist = resolve(root, "dist");
 const isWatch = process.argv.includes("--watch");
 
 const options = {
-  entryPoints: [resolve(root, "src", "editor.js")],
-  outfile: resolve(dist, "tiptap.bundle.js"),
+  entryPoints: { "tiptap.bundle": resolve(root, "src", "editor.js"), "code-syntax": resolve(root, "src", "code-syntax.js") },
+  outdir: dist,
   bundle: true,
   minify: true,
   sourcemap: false,
@@ -24,10 +24,17 @@ const options = {
 async function prepareDist() {
   await rm(dist, { recursive: true, force: true });
   await mkdir(dist, { recursive: true });
-  await copyFile(resolve(root, "src", "tiptap.html"), resolve(dist, "tiptap.html"));
+  let html = await readFile(resolve(root, "src", "tiptap.html"), "utf8");
+  const grainName = "label-grain-light.png";
+  const grain = await readFile(resolve(root, "src", grainName));
+  // The inline WKWebView document and exports must not depend on a file request.
+  html = html.replaceAll(`"./${grainName}"`, `"data:image/png;base64,${grain.toString("base64")}"`);
+  await writeFile(resolve(dist, grainName), grain);
+  await writeFile(resolve(dist, "tiptap.html"), html);
   await cp(resolve(root, "src", "fonts"), resolve(dist, "fonts"), { recursive: true });
   await cp(resolve(root, "src", "vendor"), resolve(dist, "vendor"), { recursive: true });
-  for (const name of ["table-formulas.js", "vellix-tables.js", "vellix-tables.css", "text-gradient-paint.js"]) {
+  await copyFile(resolve(root, "node_modules", "prismjs", "LICENSE"), resolve(dist, "Prism-LICENSE.txt"));
+  for (const name of ["table-formulas.js", "vellix-tables.js", "vellix-tables.css", "text-gradient-paint.js", "code-block-catalog.json"]) {
     await copyFile(resolve(root, "src", name), resolve(dist, name));
   }
 }

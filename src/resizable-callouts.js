@@ -1,8 +1,7 @@
 import { Node, Extension } from "@tiptap/core";
-import { DOMSerializer } from "@tiptap/pm/model";
-import { Plugin } from "@tiptap/pm/state";
-import { closeHistory } from "@tiptap/pm/history";
-import { changedRanges } from "./incremental-nodes.js";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { changedRanges, inlineTextEdit } from "./incremental-nodes.js";
 import { placeCaretInSlot } from "./caret-slots.js";
 import { calloutWidth, calloutRowMetrics } from "./callout-layout.js";
 
@@ -65,99 +64,61 @@ export function calloutRow({ selectionActive }) {
   });
 }
 
-export function resizableCalloutView({ node, editor, getPos, selectionActive }) {
-  let current = node, drag = null, cleanup = null;
-  const rendered = DOMSerializer.renderSpec(document, node.type.spec.toDOM(node));
-  const dom = rendered.dom, contentDOM = rendered.contentDOM;
-  let renderedAttributes = new Set([...dom.attributes].map(attribute => attribute.name));
-  const handles = document.createElement("div");
-  handles.className = "vellix-table-resizers penned-callout-resizers";
-  handles.contentEditable = "false";
-  const edge = document.createElement("span");
-  edge.className = "vellix-table-resize-line"; edge.style.left = "100%";
-  edge.setAttribute("aria-label", "Resize callout width");
-  edge.addEventListener("touchstart", event => {
-    if (editor.isEditable && !selectionActive()) event.preventDefault();
-  }, { passive: false });
-  handles.append(edge); dom.append(handles);
-  edge.addEventListener("pointerdown", event => {
-    if (!editor.isEditable || selectionActive() || event.button !== 0 || drag) return;
-    const position = getPos();
-    if (typeof position !== "number") return;
-    const boundary = editor.state.doc.resolve(position);
-    const row = boundary.parent.type.name === "plainCalloutRow" ? boundary.parent : null;
-    const container = row ? dom.closest(".penned-callout-row") : dom.parentElement;
-    const available = container?.getBoundingClientRect().width;
-    if (!available) return;
-    const siblings = row ? row.content.content.filter(child => child !== current) : [];
-    const otherWidth = siblings.reduce((sum, child) => sum + (calloutWidth(child.attrs.widthPercent) || 0), 0);
-    const maximum = Math.max(1, 100 - otherWidth);
-    const minimum = Math.min(maximum, 100 * Math.min(120, available) / available);
-    const start = event.clientX, original = calloutWidth(current.attrs.widthPercent) || 100;
-    let width = original;
-    drag = { id: current.attrs.id };
-    const restore = () => {
-      dom.style.removeProperty("--penned-callout-preview-width");
-      dom.classList.remove("penned-callout-resizing");
-      drag = null;
-    };
-    dom.classList.add("penned-callout-resizing");
-    cleanup = window.VellixTables.trackHorizontalResize(event, {
-      move(next) {
-        width = Math.max(minimum, Math.min(maximum, original + 100 * (next.clientX - start) / available));
-        dom.style.setProperty("--penned-callout-preview-width", `${width}%`);
-      },
-      finish() {
-        const at = getPos(), state = editor.state;
-        const target = typeof at === "number" && state.doc.nodeAt(at);
-        const changed = Math.abs(width - original) >= 0.1;
-        const identity = drag?.id;
-        restore();
-        if (!changed || !editor.isEditable || target?.type.name !== "plainCallout" || target.attrs.id !== identity) return;
-        const tr = closeHistory(state.tr.setNodeMarkup(at, undefined,
-          { ...target.attrs, widthPercent: Math.round(width * 100) / 100 }));
-        const resolved = tr.doc.resolve(at);
-        if (resolved.parent.type.name !== "plainCalloutRow" && width < 99.9) {
-          const range = resolved.blockRange(tr.doc.resolve(at + target.nodeSize));
-          if (range && range.parent.canReplaceWith(range.startIndex, range.endIndex, state.schema.nodes.plainCalloutRow)) {
-            tr.wrap(range, [{ type: state.schema.nodes.plainCalloutRow, attrs: { id: crypto.randomUUID() } }]);
+const legacyToggleKey = new PluginKey("pennedLegacyToggleFollowers");
+const legacyFollowerTypes = new Set(["plainCallout", "iconCallout", "gridCard", "divider", "plainCalloutRow"]);
+const isIndentedFollower = node => legacyFollowerTypes.has(node.type.name) && Number(node.attrs.indent) > 0;
+
+function legacyToggleDecorations(doc) {
+  const decorations = [];
+  const visit = (parent, start) => {
+    let toggle = null;
+    parent.forEach((node, offset) => {
+      const pos = start + offset;
+      if (node.type.name === "toggleItem") {
+        toggle = node;
+      } else if (toggle) {
+        // Older indents left callouts beside the toggle. Stop at the first
+        // ordinary sibling; a later independent block is not toggle content.
+        const mark = (item, from) => decorations.push(Decoration.node(from, from + item.nodeSize, {
+          "data-legacy-toggle-body": toggle.attrs.open === false ? "closed" : "open",
+        }));
+        if (isIndentedFollower(node)) {
+          mark(node, pos);
+        } else if (node.type.name === "plainCalloutRow" && node.childCount) {
+          let allIndented = true;
+          node.forEach(child => { if (!isIndentedFollower(child)) allIndented = false; });
+          if (allIndented) mark(node, pos);
+          else {
+            node.forEach((child, childOffset) => {
+              if (isIndentedFollower(child)) mark(child, pos + 1 + childOffset);
+            });
+            toggle = null;
           }
-        }
-        editor.view.dispatch(tr);
-        editor.view.dispatch(closeHistory(editor.state.tr));
-      },
-      cancel: restore,
-    });
-  });
-  return { dom, contentDOM,
-    update(next) {
-      if (next.type !== current.type) return false;
-      if (next.attrs !== current.attrs) {
-        const fresh = DOMSerializer.renderSpec(document, next.type.spec.toDOM(next));
-        const preview = dom.style.getPropertyValue("--penned-callout-preview-width");
-        for (const name of renderedAttributes) {
-          if (name !== "class" && !fresh.dom.hasAttribute(name)) dom.removeAttribute(name);
-        }
-        for (const attribute of [...fresh.dom.attributes]) {
-          if (attribute.name !== "class") dom.setAttribute(attribute.name, attribute.value);
-        }
-        renderedAttributes = new Set([...fresh.dom.attributes].map(attribute => attribute.name));
-        if (drag && preview) dom.style.setProperty("--penned-callout-preview-width", preview);
-        dom.classList.toggle("penned-clip-source", !!next.attrs.clipSource);
-        contentDOM.className = fresh.contentDOM.className;
-        if (JSON.stringify(next.attrs.clipSource) !== JSON.stringify(current.attrs.clipSource)) {
-          for (const child of [...dom.children]) if (child !== contentDOM && child !== handles) child.remove();
-          for (const child of [...fresh.dom.children]) if (child !== fresh.contentDOM) dom.insertBefore(child, contentDOM);
+        } else {
+          toggle = null;
         }
       }
-      current = next;
-      return true;
-    },
-    stopEvent: event => handles.contains(event.target),
-    ignoreMutation: mutation => mutation.type !== "selection" && !contentDOM.contains(mutation.target),
-    destroy() { cleanup?.(); },
+      if (!node.isTextblock && node.childCount) visit(node, pos + 1);
+    });
   };
+  visit(doc, 0);
+  return DecorationSet.create(doc, decorations);
 }
+
+export const LegacyToggleFollowers = Extension.create({
+  name: "pennedLegacyToggleFollowers",
+  addProseMirrorPlugins: () => [new Plugin({
+    key: legacyToggleKey,
+    state: {
+      init: (_, state) => legacyToggleDecorations(state.doc),
+      apply(tr, previous) {
+        if (!tr.docChanged) return previous;
+        return inlineTextEdit(tr) ? previous.map(tr.mapping, tr.doc) : legacyToggleDecorations(tr.doc);
+      },
+    },
+    props: { decorations: state => legacyToggleKey.getState(state) },
+  })],
+});
 
 // Empty rows are structural, not editable blocks. Inspect only changed ranges.
 export const CalloutRowCleanup = Extension.create({

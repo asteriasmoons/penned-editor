@@ -117,7 +117,7 @@ export function clearUnusedCaretSlots(editor) {
   if (tr.docChanged) editor.view.dispatch(closeHistory(tr).setMeta("addToHistory", false));
 }
 
-export function placeCaretInSlot(editor, position, { column = false } = {}) {
+export function placeCaretInSlot(editor, position, { column = false, scroll = true } = {}) {
   const { state } = editor;
   const boundary = state.doc.resolve(Math.max(0, Math.min(position, state.doc.content.size)));
   const paragraph = state.schema.nodes.paragraph;
@@ -142,7 +142,7 @@ export function placeCaretInSlot(editor, position, { column = false } = {}) {
     } });
   }
   tr.setSelection(TextSelection.create(tr.doc, start + 1)).setMeta("pointer", true);
-  editor.view.dispatch(tr.scrollIntoView());
+  editor.view.dispatch(scroll ? tr.scrollIntoView() : tr);
   editor.view.focus();
   return true;
 }
@@ -244,6 +244,45 @@ export function placeCaretOnTrailingNumberedLine(editor, target, clientX, client
   return true;
 }
 
+const pageBreakSelector = "[data-vellix-page-break], [data-type='pageBreak'], [data-page-break]";
+
+export function pageBreakGapAtPoint(editor, target, x, y) {
+  const { view, state } = editor;
+  if (!(target instanceof HTMLElement) || !view.dom.contains(target)) return null;
+  if (target.closest("button, a, input, textarea, select, [role='button']")) return null;
+  let block = target;
+  while (block !== view.dom && block.parentElement !== view.dom) block = block.parentElement;
+  const invisible = element => element.hidden || element.classList.contains("ProseMirror-widget");
+  const neighbor = (element, side) => {
+    let next = element[side];
+    while (next && invisible(next)) next = next[side];
+    return next;
+  };
+  const breaks = block === view.dom ? view.dom.querySelectorAll(":scope > :is(" + pageBreakSelector + ")")
+    : [neighbor(block, "previousElementSibling"), block, neighbor(block, "nextElementSibling")];
+  for (const element of breaks) {
+    if (!element?.matches(pageBreakSelector) || element.parentElement !== view.dom) continue;
+    const rect = element.getBoundingClientRect();
+    if (!rect.height || x < rect.left || x > rect.right) continue;
+    const previous = neighbor(element, "previousElementSibling");
+    const next = neighbor(element, "nextElementSibling");
+    const painted = item => item?.matches(".vellix-plain-callout, .vellix-callout, .penned-rich-link");
+    const bottomPadding = previous && !painted(previous) ? parseFloat(getComputedStyle(previous).paddingBottom) || 0 : 0;
+    const topPadding = next && !painted(next) ? parseFloat(getComputedStyle(next).paddingTop) || 0 : 0;
+    const upper = Math.min(rect.top, (previous?.getBoundingClientRect().bottom ?? rect.top) - bottomPadding);
+    const lower = Math.max(rect.bottom, (next?.getBoundingClientRect().top ?? rect.bottom) + topPadding);
+    if (y < upper || y >= lower) continue;
+    const mapped = view.posAtDOM(element, 0);
+    let position = [mapped, mapped - 1].find(pos =>
+      pos >= 0 && state.doc.nodeAt(pos)?.type.name === "pageBreak" && view.nodeDOM(pos) === element);
+    if (position == null) state.doc.forEach((node, offset) => {
+      if (position == null && node.type.name === "pageBreak" && view.nodeDOM(offset) === element) position = offset;
+    });
+    if (position != null) return y < rect.top + rect.height / 2 ? position : position + state.doc.nodeAt(position).nodeSize;
+  }
+  return null;
+}
+
 function blockBounds(view, node, position) {
   const element = view.nodeDOM(position);
   if (!(element instanceof HTMLElement) || element.hidden) return null;
@@ -259,7 +298,12 @@ function blockBounds(view, node, position) {
   }
   if (!node.isTextblock || node.type.spec.code || !node.content.size) return rect;
   const range = document.createRange();
-  range.selectNodeContents(element);
+  // Label headings contain decorative surfaces that can extend beyond the
+  // actual text. Use the editable text for caret-gap boundaries so tapping
+  // beneath the label behaves like tapping beneath an ordinary heading.
+  const textSurface = element.matches(".penned-heading-label")
+    ? element.querySelector(".penned-label-text") ?? element : element;
+  range.selectNodeContents(textSurface);
   const lines = [...range.getClientRects()].filter(line => line.width > 0 && line.height > 0);
   return lines.length ? {
     top: Math.min(...lines.map(line => line.top)),

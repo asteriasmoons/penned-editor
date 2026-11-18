@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import postcss from "postcss";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), ".."), args = process.argv.slice(2);
+const reuseSymbols = args.includes("--reuse-symbols");
 const site = args.includes("--site") ? resolve(args[args.indexOf("--site") + 1]) : null;
 const app = args.includes("--app") ? resolve(args[args.indexOf("--app") + 1]) : null;
 if (!site || !app) throw new Error("Provide --site <Penned-Site> and --app <Vellix project>");
@@ -32,10 +33,15 @@ for (const name of (await readdir(catalogue)).filter(name => name.endsWith(".ima
   }
   manifest[icon] = `/viewer-assets/icons/${key}`;
 }
-const symbolManifest = join(tmpdir(), `penned-symbols-${process.pid}.json`);
-execFileSync("swift", [join(root, "scripts/export-symbol-icons.swift"), join(app, "Vellix/Resources/SFSymbolCatalog.json"), join(assets, "symbols"), symbolManifest], { stdio: "pipe" });
-Object.assign(manifest, JSON.parse(await readFile(symbolManifest, "utf8")));
-await rm(symbolManifest);
+if (reuseSymbols) {
+  const existing = JSON.parse(await readFile(join(vendor, "icons.json"), "utf8"));
+  Object.assign(manifest, Object.fromEntries(Object.entries(existing).filter(([name]) => name.startsWith("sf:"))));
+} else {
+  const symbolManifest = join(tmpdir(), `penned-symbols-${process.pid}.json`);
+  execFileSync("swift", [join(root, "scripts/export-symbol-icons.swift"), join(app, "Vellix/Resources/SFSymbolCatalog.json"), join(assets, "symbols"), symbolManifest], { stdio: "pipe" });
+  Object.assign(manifest, JSON.parse(await readFile(symbolManifest, "utf8")));
+  await rm(symbolManifest);
+}
 await writeFile(join(vendor, "icons.json"), JSON.stringify(manifest));
 const html = await readFile(join(root, "src/tiptap.html"), "utf8");
 const extracted = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
@@ -50,11 +56,13 @@ css.walkDecls(declaration => {
     (_, quote, name) => `url(${JSON.stringify(manifest[decodeURIComponent(name)] || manifest.linedpages)})`);
 });
 await writeFile(join(assets, "editor.css"), "/* Generated from Penned's native editor CSS. Run export-public-reader.mjs. */\n" + css.toString());
+await copyFile(join(root, "src", "label-grain-light.png"), join(assets, "label-grain-light.png"));
 await build({ entryPoints: [join(root, "src/public-document.js")], outfile: join(vendor, "index.mjs"), bundle: true,
-  format: "esm", platform: "node", target: "node22", external: ["@tiptap/*"],
+  format: "esm", platform: "node", target: "node22", external: ["@tiptap/core", "@tiptap/starter-kit", "@tiptap/html/*", "@tiptap/extension-code", "@tiptap/pm/*"],
   banner: { js: '/* Generated from penned-editor/src/public-document.js. */\nimport {createRequire as readerRequire} from "node:module"; const require = readerRequire(import.meta.url);' },
   sourcemap: false, minify: false });
 await copyFile(join(root, "src/public-document.d.ts"), join(vendor, "index.d.mts"));
+await copyFile(join(root, "src/scalloped-label.js"), join(vendor, "scalloped-label.js"));
 await writeFile(join(vendor, "source.json"), JSON.stringify({ source: "penned-editor/src/public-document.js", icons: Object.keys(manifest).length,
   rendererSHA256: createHash("sha256").update(await readFile(join(root, "src/public-document.js"))).digest("hex"),
   cssSHA256: createHash("sha256").update(css.toString()).digest("hex") }, null, 2) + "\n");

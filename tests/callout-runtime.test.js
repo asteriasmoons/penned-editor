@@ -77,7 +77,7 @@ for (const type of ["callout", "plainCallout"]) {
           : new h.window.InputEvent("beforeinput", { inputType: "deleteContentBackward", bubbles: true, cancelable: true });
         h.editor.view.dom.dispatchEvent(event);
         assert.equal(event.defaultPrevented, true);
-        assert(h.editor.isActive(type));
+        assert(h.editor.isActive(type === "callout" ? "gridCard" : type));
         assert.equal(h.editor.state.selection.$from.parent.textContent, "OneTwo");
         assert.equal(h.editor.state.selection.$from.parentOffset, 3);
         const saved = await h.json();
@@ -228,19 +228,36 @@ test("loading another document invalidates old callout insertion tokens", async 
   } finally { h.close(); }
 });
 
-test("existing icon callouts keep their type, identity, icon, color, text and formatting", async () => {
+test("existing icon callouts become Grid Cards without losing identity, icon tint, text or formatting", async () => {
   const h = await runtime([callout("callout", "existing", "#FF5EAB", "Existing note")]);
   try {
     const saved = await h.json();
     const block = saved.content[0];
-    assert.equal(block.type, "callout");
+    assert.equal(block.type, "gridCard");
     assert.equal(block.attrs.id, "existing");
     assert.equal(block.attrs.icon, "heartwavy");
-    assert.equal(block.attrs.color, "#FF5EAB");
+    assert.equal(block.attrs.iconColor, "#FF5EAB");
+    assert.equal(block.attrs.width, "full");
     assert.deepEqual(block.content[0].content[0].marks, [{ type: "bold" }]);
     assert(h.window.document.querySelector(".vellix-callout-icon-button"));
     await h.command("setContent", { document: saved });
     assert.deepEqual(await h.json(), saved);
+  } finally { h.close(); }
+});
+
+test("pasting legacy icon-callout HTML imports only its body and keeps the icon", async () => {
+  const h = await runtime([paragraph("", "paste-here")]);
+  try {
+    h.selectStart("paste-here");
+    h.editor.commands.insertContent('<div data-type="vellix-callout" data-callout-icon="sf:book" data-callout-color="#243649">' +
+      '<button type="button">Icon control</button><div class="vellix-callout-text"><p><em>Saved body</em></p></div></div>');
+    const saved = (await h.json()).content[0];
+    assert.equal(saved.type, "gridCard");
+    assert(saved.attrs.id);
+    assert.equal(saved.attrs.icon, "sf:book");
+    assert.equal(saved.attrs.iconColor, "#243649");
+    assert.equal(saved.attrs.backgroundColor, "#e5e3e8");
+    assert.deepEqual(saved.content[0].content, [{ type: "text", text: "Saved body", marks: [{ type: "italic" }] }]);
   } finally { h.close(); }
 });
 
@@ -340,15 +357,16 @@ test("repeated Return inside a side-by-side callout keeps the row and its siblin
   } finally { h.close(); }
 });
 
-test("icon callouts still exit on the first Return", async () => {
-  const h = await runtime([callout("callout", "icon", "#FF5EAB", "Unchanged icon callout")]);
+test("Return edits the description within its Grid Card", async () => {
+  const h = await runtime([callout("callout", "icon", "#FF5EAB", "Original description")]);
   try {
     const original = (await h.json()).content[0];
     h.selectEnd("icon-text"); h.enter();
     const saved = await h.json();
-    assert.deepEqual(saved.content[0], original);
-    assert.equal(saved.content[1].type, "paragraph");
-    assert(!h.editor.isActive("callout"));
+    assert.deepEqual(saved.content[0].attrs, original.attrs);
+    assert.equal(saved.content[0].content[1].type, "paragraph");
+    assert.equal(saved.content.length, 1);
+    assert(h.editor.isActive("gridCard"));
   } finally { h.close(); }
 });
 
@@ -485,19 +503,62 @@ test("changing a plain callout color preserves both callout types and rich conte
     assert.deepEqual(after.content[1].content, before.content[1].content);
     await h.command("setContent", { document: after });
     assert.deepEqual(await h.json(), after);
-    await h.command("updateCalloutIcon", { blockId: "plain", icon: "sparkle" });
-    assert(!("icon" in (await h.json()).content[1].attrs));
   } finally { h.close(); }
 });
 
-test("icon callouts still use the original icon picker and never the plain color-only request", async () => {
+test("Grid Card chrome opens its own settings, never the plain callout color picker", async () => {
   const h = await runtime([callout("callout", "old", "#FF5EAB", "Original")]);
   try {
     h.window.document.querySelector(".vellix-callout-icon-button").dispatchEvent(
       new h.window.MouseEvent("click", { bubbles: true, cancelable: true }));
-    assert.deepEqual(h.events.filter(event => event.kind === "iconPickerRequest").at(-1)?.payload,
-      { blockId: "old", currentIcon: "heartwavy", currentColor: "#FF5EAB" });
+    const request = h.events.filter(event => event.kind === "gridCardSettings").at(-1)?.payload;
+    assert.equal(request.blockID, "old");
+    assert.equal(request.node.attrs.icon, "heartwavy");
+    assert.equal(request.node.attrs.iconColor, "#FF5EAB");
     assert.equal(h.events.filter(event => event.kind === "calloutColorPickerRequest").length, 0);
+  } finally { h.close(); }
+});
+
+test("Grid Card insertion, settings, undo and reload keep independent cards and rich descriptions", async () => {
+  const h = await runtime([paragraph("", "start"), callout("callout", "legacy", "#FF5EAB", "Original")]);
+  try {
+    h.selectStart("start");
+    assert.equal(await h.command("insertBlock", { blockType: "gridCard" }), true);
+    const first = h.events.filter(event => event.kind === "gridCardSettings").at(-1).payload;
+    h.editor.commands.setTextSelection(2);
+    assert.equal(await h.command("insertBlock", { blockType: "gridCard" }), true);
+    const second = h.events.filter(event => event.kind === "gridCardSettings").at(-1).payload;
+    assert.notEqual(first.blockID, second.blockID);
+    const initial = await h.json();
+    assert.deepEqual(initial.content.slice(0, 3).map(node => node.attrs.id), [first.blockID, second.blockID, "legacy"]);
+    const settings = { ...first.node.attrs, title: "Reading", alignment: "right", width: "full", height: 267,
+      icon: "sf:book", backgroundColor: "#c4e5de33", iconColor: "#2c4e56" };
+    const commit = { blockID: first.blockID, original: first.node.attrs, settings };
+    assert(await h.command("gridCardUpdate", commit));
+    const updated = await h.json();
+    assert.equal(updated.content[0].attrs.title, "Reading");
+    assert.equal(updated.content[0].attrs.width, "full");
+    assert.equal(updated.content[0].attrs.height, 267);
+    assert.equal(updated.content[0].attrs.alignment, "right");
+    assert.equal(updated.content[0].attrs.backgroundColor, "#c4e5de");
+    assert.equal(updated.content[0].attrs.iconColor, "#2c4e56");
+    assert.deepEqual(updated.content.slice(1), initial.content.slice(1));
+    assert.equal(await h.command("gridCardUpdate", { ...commit, settings: { ...settings, height: 300 } }), false);
+    await h.command("undo");
+    assert.deepEqual(await h.json(), initial);
+    await h.command("redo");
+    assert.deepEqual(await h.json(), updated);
+    await h.command("setContent", { document: updated });
+    assert.deepEqual(await h.json(), updated);
+    const card = h.window.document.querySelector(".penned-grid-card");
+    assert.equal(card.dataset.gridWidth, "full");
+    assert.equal(card.querySelector(".penned-grid-card-title").textContent, "Reading");
+    assert(card.querySelector(".penned-grid-card-header > .vellix-callout-icon-button"));
+    h.editor.commands.insertContentAt(h.editor.state.doc.content.size, updated.content[0]);
+    const copy = (await h.json()).content.at(-1);
+    assert.equal(copy.type, "gridCard");
+    assert.notEqual(copy.attrs.id, first.blockID);
+    assert.equal(copy.attrs.title, "Reading");
   } finally { h.close(); }
 });
 

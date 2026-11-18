@@ -1,6 +1,7 @@
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { closeHistory } from "@tiptap/pm/history";
-import { createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
+import { bindNonEditingTap } from "./editor-control-activation.js";
+import { createNodeIndex, inlineTextEdit, updateNodeIndex } from "./incremental-nodes.js";
 
 const reportedSnapshots = new WeakSet();
 function taskSnapshot(doc, post, canonicalize) {
@@ -11,6 +12,12 @@ function taskSnapshot(doc, post, canonicalize) {
 
 export function independentTask(task) {
   return task ? { ...task, id: crypto.randomUUID(), occurrenceID: crypto.randomUUID(), history: [] } : null;
+}
+
+export function taskMenuContext(node, blockId = node.attrs.id) {
+  const text = node.content.content.filter(child => child.type.name !== "taskList")
+    .map(child => child.textContent).join(" ").trim();
+  return { blockId, checked: node.attrs.checked === true, task: node.attrs.trackedTask, text };
 }
 
 export function repeatLabel(rule) {
@@ -60,19 +67,14 @@ export function createChecklistItem(TaskItem, { post, selectionActive, reportHei
         history.append(dot, document.createTextNode("Completed Tasks"));
         history.setAttribute("aria-label", "Open task and completion history");
         label.append(checkbox, visual); container.append(contentDOM, history, metadata); li.append(label, container);
-        const context = () => ({ blockId: nodeID(current), checked: current.attrs.checked === true, task: current.attrs.trackedTask,
-          text: Array.from(current.content.content).filter(child => child.type.name !== "taskList").map(child => child.textContent).join(" ").trim() });
+        const context = () => taskMenuContext(current, nodeID(current));
         const openHistory = event => {
           event.preventDefault(); event.stopPropagation();
           if (!selectionActive() && current.attrs.trackedTask) post("pageOpenRequest", { documentId: "vellix-task-page:" + current.attrs.trackedTask.id });
         };
         const open = event => {
           event.preventDefault(); event.stopPropagation();
-          if (selectionActive() || !editor.isEditable) return;
-          const selection = editor.state.selection.$from;
-          let selected = false;
-          for (let depth = selection.depth; depth > 0; depth--) if (selection.node(depth).attrs.id === current.attrs.id) selected = true;
-          if (!selected) editor.commands.setTextSelection(getPos() + 2);
+          if (selectionActive() || !editor.isEditable || !li.isConnected || getPos() == null) return;
           post("taskMenuRequest", context());
         };
         const render = () => {
@@ -135,13 +137,19 @@ export function createChecklistItem(TaskItem, { post, selectionActive, reportHei
         };
         const keepSelection = event => { if (!selectionActive()) event.preventDefault(); };
         label.addEventListener("mousedown", keepSelection); label.addEventListener("click", toggle);
-        metadata.addEventListener("mousedown", keepSelection); metadata.addEventListener("click", open);
+        bindNonEditingTap(metadata, open, () => editor.isEditable && !selectionActive());
         history.addEventListener("mousedown", keepSelection); history.addEventListener("click", openHistory);
         const release = () => { awaitingCompletion = null; };
         li.addEventListener("vellix-task-release", release);
         render();
         return { dom: li, contentDOM,
-          update(node) { if (node.type.name !== "taskItem") return false; current = node; render(); return true; },
+          update(node) {
+            if (node.type.name !== "taskItem") return false;
+            const changed = node.attrs !== current.attrs && !node.sameMarkup(current);
+            current = node;
+            if (changed) render();
+            return true;
+          },
           stopEvent(event) { return !selectionActive() && [label, metadata, history].some(element => element === event.target || element.contains(event.target)); },
           ignoreMutation(mutation) {
             return [label, metadata, history].some(element => element === mutation.target || element.contains(mutation.target))
@@ -150,7 +158,6 @@ export function createChecklistItem(TaskItem, { post, selectionActive, reportHei
           destroy() {
             if (pendingTap) clearTimeout(pendingTap.timer);
             label.removeEventListener("mousedown", keepSelection); label.removeEventListener("click", toggle);
-            metadata.removeEventListener("mousedown", keepSelection); metadata.removeEventListener("click", open);
             history.removeEventListener("mousedown", keepSelection); history.removeEventListener("click", openHistory);
             li.removeEventListener("vellix-task-release", release);
           },
@@ -163,6 +170,11 @@ export function createChecklistItem(TaskItem, { post, selectionActive, reportHei
 export function createTaskIntegration({ Extension, Plugin, PluginKey, post, selectionActive, canonicalize }) {
   const pluginKey = new PluginKey("vellixTrackedTasks");
   const isTask = node => node.type.name === "taskItem";
+  const indexes = new WeakMap();
+  const taskIndex = doc => {
+    if (!indexes.has(doc)) indexes.set(doc, createNodeIndex(doc, isTask));
+    return indexes.get(doc);
+  };
   return Extension.create({
     name: "vellixTrackedTasks",
     addGlobalAttributes() {
@@ -172,8 +184,12 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
       return [new Plugin({
         key: pluginKey,
         state: {
-          init: (_config, state) => createNodeIndex(state.doc, isTask),
-          apply: (tr, index) => updateNodeIndex(index, tr, isTask),
+          init: () => 0,
+          apply(tr, revision) {
+            if (!tr.docChanged || inlineTextEdit(tr)) return revision;
+            indexes.set(tr.doc, updateNodeIndex(taskIndex(tr.before), tr, isTask));
+            return revision + 1;
+          },
         },
         props: {
           transformPasted(slice) {
@@ -187,9 +203,9 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
           },
         },
         appendTransaction(transactions, old, state) {
-          if (!transactions.some(tr => tr.docChanged)) return null;
-          const previousNodes = new Set(pluginKey.getState(old).records.map(record => record.node));
-          const records = pluginKey.getState(state).records;
+          if (!transactions.some(tr => tr.docChanged && !inlineTextEdit(tr))) return null;
+          const previousNodes = new Set(taskIndex(old.doc).records.map(record => record.node));
+          const records = taskIndex(state.doc).records;
           const stable = records.filter(record => previousNodes.has(record.node));
           const seenBlocks = new Set(stable.map(record => record.node.attrs.id));
           const seenTasks = new Set(stable.map(record => record.node.attrs.trackedTask?.id).filter(Boolean)), tr = state.tr;
@@ -213,7 +229,7 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
           return tr.docChanged ? tr : null;
         },
         view(view) {
-          let previous = "";
+          let previous = undefined;
           const update = (view, old) => {
             let current = null;
             if (!selectionActive()) {
@@ -222,13 +238,16 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
                 if (node.type.name === "taskItem") { current = { blockId: node.attrs.id, checked: !!node.attrs.checked, task: node.attrs.trackedTask }; break; }
               }
             }
-            const key = JSON.stringify(current);
-            if (key !== previous) { previous = key; post("taskState", current || {}); }
-            if (old && view.state.doc !== old.doc) {
-              const before = new Map(pluginKey.getState(old).records
+            if (previous === undefined || previous?.blockId !== current?.blockId ||
+                previous?.checked !== current?.checked || previous?.task !== current?.task) {
+              previous = current;
+              post("taskState", current || {});
+            }
+            if (old && pluginKey.getState(view.state) !== pluginKey.getState(old)) {
+              const before = new Map(taskIndex(old.doc).records
                 .filter(({ node }) => node.attrs.trackedTask).map(({ node }) => [node.attrs.id, node]));
               let taskChanged = false;
-              for (const { node } of pluginKey.getState(view.state).records) {
+              for (const { node } of taskIndex(view.state.doc).records) {
                 if (!node.attrs.trackedTask) continue;
                 const previous = before.get(node.attrs.id);
                 if (!previous || previous.attrs.checked !== node.attrs.checked || previous.attrs.crossed !== node.attrs.crossed ||

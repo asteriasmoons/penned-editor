@@ -29,20 +29,32 @@ import { createCaretTracking } from "./caret-tracking.js";
 import { createCalloutListBackspace } from "./callout-list-backspace.js";
 import { CaretSlots, activeColumnInsertion, beginCaretInsertion, blockGapAtPoint, clearUnusedCaretSlots,
   documentWithoutUnusedCaretSlots, endCaretInsertion, hasCaretInsertion, placeCaretInSlot, resetCaretInsertions, restoreCaretInsertion,
-  trailingNumberedLine, separateTrailingNumberedLine, placeCaretOnTrailingNumberedLine } from "./caret-slots.js";
-import { calloutRow, CalloutRowCleanup, calloutWidthAttribute, resizableCalloutView } from "./resizable-callouts.js";
+  trailingNumberedLine, separateTrailingNumberedLine, placeCaretOnTrailingNumberedLine, pageBreakGapAtPoint } from "./caret-slots.js";
+import { calloutRow, CalloutRowCleanup, calloutWidthAttribute, LegacyToggleFollowers } from "./resizable-callouts.js";
 import { calloutRowMetrics } from "./callout-layout.js";
 import { unwrapRetiredColumns } from "./retired-column-content.js";
-import { createChecklistItem, createTaskIntegration, taskCommand } from "./document-tasks.js";
+import { createChecklistItem, createTaskIntegration, taskCommand, taskMenuContext } from "./document-tasks.js";
 import { pageReferenceNode, setPageReferences, normalizePageReferenceStarters } from "./page-reference-node.js";
 import { collectionNode, setCollections, setNativeCollectionHeight, iconAssetCSSVariable } from "./collection-node.js";
 import { createListGrid } from "./list-grid.js";
+import { createCodeBlocks } from "./code-block.js";
+import { createTabs } from "./tabs.js";
+import { bindNonEditingTap } from "./editor-control-activation.js";
+import { createMinimalFields } from "./minimal-fields.js";
+import { createInformationCard, informationCardJSON } from "./information-card.js";
+import { GRID_CARD_DEFAULTS, gridCardSettings, gridCardDOMAttributes, newGridCard } from "./grid-card.js";
+import { ICON_CALLOUT_DEFAULTS, iconCalloutNode, iconCalloutSettings, plainCalloutSettings, plainCalloutSurface } from "./icon-callout.js";
+import { createLabelHeading, labelLevel, labelSettings, updateHeadingLabel } from "./heading-label.js";
+import { createDocumentLinks, richLinkLayout, richLinkMetadata, webLinkURL } from "./document-links.js";
 import { nativeCollectionRegions } from "./native-collection-regions.js";
 import { prepareDocumentPresentation } from "./presentation-ready.js";
+import { repaintScallopedLabels } from "./scalloped-label.js";
 import { applyEditorAppearance } from "./appearance.js";
 import { createBlockActions } from "./block-actions.js";
 import { Caption } from "./caption.js";
-import { changedRanges, createNodeIndex, updateNodeIndex } from "./incremental-nodes.js";
+import { blockFontAttribute, blockFontFamilies } from "./block-font.js";
+import { changedRanges, createNodeIndex, updateNodeIndex, inlineTextEdit } from "./incremental-nodes.js";
+import { dividerStyle as normalizedDividerStyle, dividerColor, dividerPhoto, dividerDOM, washiTapeSize } from "./divider.js";
 import "./structured-placeholders.js";
 import "./vendor/table-library.js";
 import "./table-formulas.js";
@@ -74,6 +86,11 @@ const DIVIDER_STYLES = {
     detail: "Centered circle divider",
     icon: "listcircle",
   },
+  washiTape: {
+    title: "Washi Tape",
+    detail: "Photo tape with notched ends",
+    icon: "imagesign",
+  },
 };
 const vellixIconAssets = new Map();
 const selectionHighlightPluginKey = new PluginKey("vellixTextSelectionHighlight");
@@ -104,6 +121,9 @@ const SLASH_ITEMS = [
   { key: "collection", title: "Collection", detail: "Document Table and Gallery views", icon: "linedpages" },
   { key: "table", title: "Table", detail: "Rows, columns and formulas", icon: "blackcal" },
   { key: "listGrid", title: "List Grid", detail: "Labeled rows in a grid", icon: "blackcal" },
+  { key: "tabs", title: "Tabs", detail: "Tabbed sections of content", icon: "window" },
+  { key: "fields", title: "Fields", detail: "Minimal label and value records", icon: "linedpages" },
+  { key: "informationCard", title: "Information Card", detail: "Title, description and details", icon: "linedpages" },
   { key: "heading1", title: "Title", detail: "H1, 24px", icon: "h1" },
   { key: "heading2", title: "Subtitle", detail: "H2, 21px", icon: "h2" },
   { key: "heading3", title: "Heading", detail: "H3, 18px", icon: "h3" },
@@ -113,14 +133,16 @@ const SLASH_ITEMS = [
   { key: "nestedPage", title: "Page", detail: "A page inside this document", icon: "linedpages" },
   { key: "pageCard", title: "Card", detail: "A page with a custom card preview", icon: "linedpages" },
   { key: "toggleListItem", title: "Toggle", detail: "Collapsible block", icon: "chevright" },
-  { key: "callout", title: "Callout with Icon", detail: "Highlighted note with an icon", icon: "sparkle" },
-  { key: "plainCallout", title: "Callout without Icon", detail: "Highlighted text without an icon", icon: "linedpages" },
+  { key: "iconCallout", title: "Icon Callout", detail: "Icon and highlighted text", icon: "sparkle" },
+  { key: "plainCallout", title: "Plain Callout", detail: "Highlighted text", icon: "linedpages" },
+  { key: "gridCard", title: "Grid Cards", detail: "Independent icon and text cards", icon: "gridboard" },
   { key: "quote", title: "Blockquote", detail: "Quoted text", icon: "quote" },
   { key: "checkListItem", title: "Checklist", detail: "Hollow circle tasks", icon: "checkwavy" },
   { key: "bulletListItem", title: "Bullet List", detail: "Bulleted items", icon: "listcircle" },
   { key: "numberedListItem", title: "Numbered List", detail: "Ordered items", icon: "numcal" },
   { key: "underline", title: "Underline", detail: "Underlined text", icon: "linesbmark" },
   { key: "inlineCode", title: "Inline Code", detail: "Inline code text", icon: "codewindow" },
+  { key: "codeBlock", title: "Code Block", detail: "Standalone syntax-highlighted code", icon: "codewindow" },
   { key: "pageBreak", title: "Page Break", detail: "Page boundary", icon: "pagefold" },
   ...PROPERTY_KINDS.map(({ kind, title, icon }) => ({
     key: `property:${kind}`, title: `${title} Property`, detail: "Named property row", icon,
@@ -136,6 +158,9 @@ const SLASH_ITEMS = [
 function postToSwift(kind, payload = {}) {
   try {
     window.webkit?.messageHandlers?.tiptap?.postMessage({ kind, payload });
+    if (kind === "snapshot" && pendingUpdateDoc && pendingUpdateDoc === snapshotDocument && payload === cachedSnapshot) {
+      cancelScheduledUpdate();
+    }
   } catch (_e) {
     console.log("[Vellix TipTap]", kind, payload);
   }
@@ -163,24 +188,6 @@ function nodeId(node) {
 
 function normalizedIconName(icon) {
   return String(icon || DEFAULT_CALLOUT_ICON).trim() || DEFAULT_CALLOUT_ICON;
-}
-
-function normalizedDividerStyle(style) {
-  const cleanStyle = String(style || "").trim();
-  switch (cleanStyle) {
-    case "dottedCircles":
-    case "tinyDots":
-      return "dottedCircles";
-    case "fourCircles":
-    case "fourDots":
-      return "fourCircles";
-    case "thickLine":
-      return "thickLine";
-    case "thinLine":
-      return "thinLine";
-    default:
-      return DEFAULT_DIVIDER_STYLE;
-  }
 }
 
 function iconSource(icon, tint = DEFAULT_CALLOUT_COLOR, size = 22) {
@@ -396,6 +403,7 @@ function plainText(node) {
   if (node.type === "inlineTag") return "#" + (node.attrs?.name ?? "");
   if (node.type === "inlineProperty") return propertyText(node.attrs?.property);
   if (node.type === "attachment") return typeof node.attrs?.file?.name === "string" ? node.attrs.file.name : "";
+  if (node.type === "gridCard") return [node.attrs?.title, plainText(node.content)].filter(Boolean).join(" ");
   const own = typeof node.text === "string" ? node.text : "";
   const content = plainText(node.content);
   const children = plainText(node.children);
@@ -408,7 +416,7 @@ function calloutTraceRecords(source) {
     nodes?.forEach((node, index) => {
       if (!isRecord(node)) return;
       const nextPath = [...path, index];
-      if (node.type === "callout") {
+      if (node.type === "callout" || node.type === "gridCard") {
         records.push({
           path: nextPath.join("."),
           id: node.attrs?.id ?? null,
@@ -444,7 +452,7 @@ function normalizeTipTapNode(value) {
     return normalizeTipTapDocument(value);
   }
 
-  const type = typeof value.type === "string" ? value.type : "paragraph";
+  const type = value.type === "callout" ? "gridCard" : typeof value.type === "string" ? value.type : "paragraph";
   if (type === "text") {
     const textNode = { type: "text", text: typeof value.text === "string" ? value.text : "" };
     if (Array.isArray(value.marks)) {
@@ -462,17 +470,30 @@ function normalizeTipTapNode(value) {
 
   const attrs = isRecord(value.attrs) ? { ...value.attrs } : {};
   attrs.id = typeof attrs.id === "string" && attrs.id.trim() ? attrs.id.trim() : id();
+  if (type === "divider") {
+    attrs.style = normalizedDividerStyle(attrs.style);
+    if (attrs.style === "washiTape" || attrs.tapeSize != null) attrs.tapeSize = washiTapeSize(attrs.tapeSize);
+    else delete attrs.tapeSize;
+    attrs.color = dividerColor(attrs.color);
+    attrs.remotePhoto = dividerPhoto(attrs.remotePhoto);
+    attrs.imagePath = !attrs.remotePhoto && typeof attrs.imagePath === "string" && attachmentURL({ relativePath: attrs.imagePath })
+      ? attrs.imagePath : null;
+  }
+  if (type === "heading") {
+    if (isRecord(attrs.label)) attrs.label = labelSettings(attrs.label);
+    else delete attrs.label;
+  }
   if (type === "inlineProperty") attrs.property = normalizeProperty(attrs.property);
 
-  if (type === "callout") {
-    attrs.icon =
-      typeof attrs.icon === "string" && attrs.icon.trim()
-        ? attrs.icon.trim()
-        : DEFAULT_CALLOUT_ICON;
-    attrs.color =
-      typeof attrs.color === "string" && attrs.color.trim()
-        ? attrs.color.trim()
-        : DEFAULT_CALLOUT_COLOR;
+  if (type === "gridCard") {
+    Object.assign(attrs, gridCardSettings(attrs));
+    delete attrs.color;
+  }
+  if (type === "iconCallout") Object.assign(attrs, iconCalloutSettings(attrs));
+  if (type === "richLink") {
+    attrs.href = webLinkURL(attrs.href) || "";
+    attrs.layout = richLinkLayout(attrs.layout);
+    attrs.metadata = richLinkMetadata(attrs.metadata);
   }
 
   if (type === "taskItem") {
@@ -490,7 +511,7 @@ function normalizeTipTapNode(value) {
     ? value.content.map(normalizeTipTapNode).filter((node) => node.type !== "doc")
     : undefined;
 
-  if (type === "callout" || type === "plainCallout") {
+  if (["gridCard", "iconCallout", "plainCallout"].includes(type)) {
     const hasBlockContent = content?.some((node) => node.type !== "text" && node.type !== "hardBreak") ?? false;
     content = hasBlockContent ? content : [paragraph(content ?? [])];
   }
@@ -616,21 +637,8 @@ function importLegacyBlock(value) {
         content: [paragraph(content)],
       };
     case "callout":
-      return {
-        type: "callout",
-        attrs: {
-          id: blockID,
-          icon:
-            typeof props.icon === "string" && props.icon.trim()
-              ? props.icon.trim()
-              : DEFAULT_CALLOUT_ICON,
-          color:
-            typeof props.color === "string" && props.color.trim()
-              ? props.color.trim()
-              : DEFAULT_CALLOUT_COLOR,
-        },
-        content: [paragraph(content)],
-      };
+      return normalizeTipTapNode({ type: "gridCard", attrs: { ...props, id: blockID },
+        content: [paragraph(content), ...children] });
     case "divider":
       return {
         type: "divider",
@@ -808,18 +816,20 @@ function renderChangedCalloutIcons(transaction) {
     const from = Math.max(0, range.from - 1);
     const to = Math.min(transaction.doc.content.size, range.to + 1);
     transaction.doc.nodesBetween(from, to, (node, position) => {
-      if (node.type.name === 'callout') addCallout(position);
+      if (["gridCard", "iconCallout"].includes(node.type.name)) addCallout(position);
       return !node.isText;
     });
     const resolved = transaction.doc.resolve(Math.min(range.from, transaction.doc.content.size));
     for (let depth = resolved.depth; depth > 0; depth--) {
-      if (resolved.node(depth).type.name === 'callout') addCallout(resolved.before(depth));
+      if (["gridCard", "iconCallout"].includes(resolved.node(depth).type.name)) addCallout(resolved.before(depth));
     }
   }
   affected.forEach(callout => renderCalloutIcons(callout));
 }
 
+let editorAppearance = {};
 function applyAppearance(payload = {}) {
+  editorAppearance = { ...editorAppearance, ...payload };
   applyEditorAppearance(document.documentElement, payload);
 }
 
@@ -827,6 +837,7 @@ const BlockID = Extension.create({
   name: "vellixBlockID",
   addGlobalAttributes() {
     return [
+      { types: ["paragraph", "caption", "heading", "richLink"], attributes: { blockFont: blockFontAttribute() } },
       {
         types: [
           "paragraph",
@@ -839,7 +850,9 @@ const BlockID = Extension.create({
           "listItem",
           "taskList",
           "taskItem",
-          "callout",
+          "gridCard",
+          "iconCallout",
+          "richLink",
           "plainCallout",
           "plainCalloutRow",
           "templateComponent",
@@ -886,36 +899,45 @@ const BlockID = Extension.create({
   addProseMirrorPlugins() {
     const assignKey = new PluginKey("vellixBlockIDAssign");
     // Ordinary blocks that should carry a persistent, auto-generated id. attachment,
-    // taskItem, the callout family, collection and templateComponent already assign
+    // taskItem, iconless callouts, collection and templateComponent already assign
     // and dedupe their own ids in their own extensions, so they are left out here to
     // avoid two assigners touching the same node.
     const autoIdTypes = new Set([
       "paragraph", "caption", "heading", "codeBlock", "blockquote",
       "bulletList", "orderedList", "listItem", "taskList",
-      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid",
+      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid", "tabs", "minimalFields", "informationCard", "gridCard", "iconCallout", "richLink",
     ]);
     const accepts = (node) => autoIdTypes.has(node.type.name);
     return [new Plugin({
       key: assignKey,
-      state: {
-        init: (_config, state) => createNodeIndex(state.doc, accepts),
-        apply: (tr, index) => updateNodeIndex(index, tr, accepts),
-      },
       // Give any accepted block that lacks an id (just typed, split off with Enter,
       // or loaded from a document saved before ids existed) a fresh one, and replace
       // any id duplicated by paste or node duplication so every id stays unique and
       // stable across edits. Only processes blocks that were actually added/replaced,
       // so once every id is present and unique it stops — no redraw loop.
       appendTransaction(transactions, oldState, newState) {
-        if (!transactions.some((tr) => tr.docChanged)) return null;
-        const before = new Set(assignKey.getState(oldState).records.map((record) => record.node));
-        const records = assignKey.getState(newState).records;
+        const changes = transactions.filter(tr => tr.docChanged);
+        if (!changes.length) return null;
+        if (changes.every(tr => inlineTextEdit(tr) && tr.steps.every((step, index) => {
+          const start = tr.docs[index].resolve(step.from);
+          for (let depth = 1; depth <= start.depth; depth++) {
+            const node = start.node(depth);
+            if (accepts(node) && !node.attrs.id) return false;
+          }
+          return true;
+        }))) return null;
+        const before = new Set(createNodeIndex(oldState.doc, accepts).records.map(record => record.node));
+        const records = createNodeIndex(newState.doc, accepts).records;
         const seen = new Set(records.filter((record) => before.has(record.node)).map((record) => record.node.attrs.id));
         const tr = newState.tr;
         for (const { node, pos } of records) {
           if (before.has(node)) continue;
-          if (!node.attrs.id || seen.has(node.attrs.id)) tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: id() });
-          seen.add(tr.doc.nodeAt(pos).attrs.id);
+          let blockID = node.attrs.id;
+          if (!blockID || seen.has(blockID)) {
+            blockID = id();
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, id: blockID });
+          }
+          seen.add(blockID);
         }
         return tr.docChanged ? tr : null;
       },
@@ -973,13 +995,8 @@ const VellixBlockquote = Blockquote.extend({
       contentDOM.className = "vellix-blockquote-content";
       dom.append(button, contentDOM);
 
-      const preventFocus = (event) => {
-        if (selectionMode !== "off") return;
-        event.preventDefault();
-        event.stopPropagation();
-      };
       const requestColor = (event) => {
-        if (selectionMode !== "off") return;
+        if (selectionMode !== "off" || !editor.isEditable) return;
         event.preventDefault();
         event.stopPropagation();
         postToSwift("blockquoteColorPickerRequest", {
@@ -987,11 +1004,7 @@ const VellixBlockquote = Blockquote.extend({
           currentColor: currentNode.attrs.color || DEFAULT_BLOCKQUOTE_COLOR,
         });
       };
-      button.addEventListener("pointerdown", preventFocus);
-      button.addEventListener("mousedown", preventFocus);
-      button.addEventListener("touchstart", preventFocus, { passive: false });
-      button.addEventListener("touchend", requestColor, { passive: false });
-      button.addEventListener("click", requestColor);
+      bindNonEditingTap(button, requestColor, () => editor.isEditable && selectionMode === "off");
       render();
       return {
         dom,
@@ -1008,63 +1021,43 @@ const VellixBlockquote = Blockquote.extend({
         ignoreMutation(mutation) {
           return (mutation.type === "attributes" && mutation.target === dom) || button.contains(mutation.target);
         },
-        destroy() {
-          button.removeEventListener("pointerdown", preventFocus);
-          button.removeEventListener("mousedown", preventFocus);
-          button.removeEventListener("touchstart", preventFocus);
-          button.removeEventListener("touchend", requestColor);
-          button.removeEventListener("click", requestColor);
-        },
       };
     };
   },
 });
 
-const Callout = Node.create({
-  name: "callout",
+const GridCard = Node.create({
+  name: "gridCard",
   group: "block",
   content: "block+",
   defining: true,
   isolating: true,
   addAttributes() {
-    return {
-      id: { default: null },
-      icon: {
-        default: DEFAULT_CALLOUT_ICON,
-        parseHTML: (element) => element.getAttribute("data-callout-icon") || DEFAULT_CALLOUT_ICON,
-        renderHTML: (attrs) => ({ "data-callout-icon": attrs.icon || DEFAULT_CALLOUT_ICON }),
-      },
-      color: {
-        default: DEFAULT_CALLOUT_COLOR,
-        parseHTML: (element) => element.getAttribute("data-callout-color") || DEFAULT_CALLOUT_COLOR,
-        renderHTML: (attrs) => ({ "data-callout-color": attrs.color || DEFAULT_CALLOUT_COLOR }),
-      },
-    };
+    return Object.fromEntries(Object.entries(GRID_CARD_DEFAULTS).map(([key, value]) =>
+      [key, { default: value, rendered: false }]));
   },
   parseHTML() {
-    return [{ tag: "div[data-type='vellix-callout']" }, { tag: "div.vellix-callout" }];
+    return ["div[data-type='penned-grid-card']", "div.vellix-callout:not([data-type='penned-icon-callout'])", "div[data-type='vellix-callout']"].map(tag => ({
+      tag,
+      contentElement: element => element.querySelector(":scope > .vellix-callout-text") ?? element,
+      getAttrs: element => gridCardSettings({
+        icon: element.dataset.calloutIcon, color: element.dataset.calloutColor,
+        backgroundColor: element.dataset.gridBackground, width: element.dataset.gridWidth,
+        alignment: element.dataset.gridAlignment, height: element.dataset.gridHeight,
+        title: element.querySelector(":scope > .penned-grid-card-header > .penned-grid-card-title")?.textContent,
+      }),
+    }));
   },
   renderHTML({ HTMLAttributes, node }) {
-    const icon = node.attrs.icon || DEFAULT_CALLOUT_ICON;
-    const color = node.attrs.color || DEFAULT_CALLOUT_COLOR;
-    traceDiag("callout-renderHTML", {
-      id: node.attrs.id || null,
-      icon: node.attrs.icon ?? null,
-      renderedIcon: icon,
-      color: node.attrs.color ?? null,
-      renderedColor: color,
-      attrs: node.attrs,
-      text: plainText(node.toJSON?.() ?? {}),
-    });
+    const { icon, iconColor, title } = gridCardSettings(node.attrs);
     return [
       "div",
-      mergeAttributes(HTMLAttributes, {
-        "data-type": "vellix-callout",
-        class: "vellix-callout",
+      mergeAttributes(HTMLAttributes, gridCardDOMAttributes(node.attrs), {
+        class: "vellix-callout penned-grid-card",
         "data-callout-icon": icon,
-        "data-callout-color": color,
-        style: `--vellix-callout-color:${color};`,
+        "data-callout-color": iconColor,
       }),
+      ["div", { class: "penned-grid-card-header", contenteditable: "false" },
       [
         "button",
         {
@@ -1072,7 +1065,7 @@ const Callout = Node.create({
           class: "vellix-callout-icon-button",
           contenteditable: "false",
           "data-vellix-callout-icon-button": "true",
-          "aria-label": "Change callout icon",
+          "aria-label": "Grid Card Settings",
         },
         [
           "span",
@@ -1080,57 +1073,21 @@ const Callout = Node.create({
             class: "vellix-callout-icon-image",
             role: "img",
             "aria-label": icon,
-            style: `background-image:${cssBackgroundImageSource(iconSource(icon, color, 22))};`,
+            style: `background-image:${cssBackgroundImageSource(iconSource(icon, iconColor, 22))};`,
           },
         ],
       ],
+      ["div", { class: "penned-grid-card-title" }, title]],
       ["div", { class: "vellix-callout-text" }, 0],
     ];
   },
-  addCommands() {
-    return {
-      insertVellixCallout:
-        (attrs = {}) =>
-        ({ commands, state }) => {
-          const calloutText = String(attrs.text || "").trim();
-          return commands.insertContentAt(
-            state.selection instanceof NodeSelection && state.selection.node.type.name === "inlineProperty"
-              ? state.selection.to
-              : { from: state.selection.from, to: state.selection.to },
-            {
-              type: "callout",
-              attrs: {
-                id: id(),
-                icon: attrs.icon || DEFAULT_CALLOUT_ICON,
-                color: attrs.color || DEFAULT_CALLOUT_COLOR,
-              },
-              content: [paragraph(inlineContent(calloutText))],
-            },
-            { updateSelection: true },
-          );
-        },
-    };
-  },
-  addKeyboardShortcuts() {
-    return {
-      Enter: ({ editor }) => {
-        const { $from } = editor.state.selection;
-        for (let depth = $from.depth; depth > 0; depth -= 1) {
-          if ($from.node(depth).type.name !== "callout") continue;
+});
 
-          const afterCallout = $from.after(depth);
-          return editor
-            .chain()
-            .focus()
-            .insertContentAt(afterCallout, paragraph(), { updateSelection: false })
-            .setTextSelection(afterCallout + 1)
-            .run();
-        }
-
-        return false;
-      },
-    };
-  },
+const IconCallout = iconCalloutNode({
+  renderLibraryIcon: (icon, color) => ["span", {
+    class: "vellix-callout-icon-image", role: "img", "aria-label": icon,
+    style: `background-image:${cssBackgroundImageSource(iconSource(icon, color, 22))};`,
+  }],
 });
 
 const PlainCallout = Node.create({
@@ -1143,6 +1100,8 @@ const PlainCallout = Node.create({
     return {
       id: { default: null },
       widthPercent: calloutWidthAttribute,
+      textColor: { default: null, parseHTML: element => plainCalloutSettings({ textColor: element.dataset.calloutTextColor }).textColor, rendered: false },
+      minimumHeight: { default: null, parseHTML: element => plainCalloutSettings({ minimumHeight: element.dataset.calloutMinimumHeight }).minimumHeight, rendered: false },
       clipSource: {
         default: null,
         parseHTML: element => {
@@ -1162,9 +1121,6 @@ const PlainCallout = Node.create({
     return [{ tag: "div[data-penned-clip-source]", contentElement: ".penned-clip-source-content" },
       { tag: "div[data-type='vellix-plain-callout']" }, { tag: "div.vellix-plain-callout" }];
   },
-  addNodeView() {
-    return props => resizableCalloutView({ ...props, selectionActive: () => selectionMode !== "off" });
-  },
   renderHTML({ HTMLAttributes, node }) {
     const color = node.attrs.color || DEFAULT_CALLOUT_COLOR;
     const source = clipSource(node.attrs.clipSource);
@@ -1174,13 +1130,12 @@ const PlainCallout = Node.create({
         clipPreview(source, attachmentURL(source.file, /heic|heif/.test(source.file?.mimeType || "") ? "image" : "")),
         ["div", { class: "vellix-plain-callout-text penned-clip-source-content" }, 0]];
     }
+    const settings = plainCalloutSettings(node.attrs);
     return ["div", mergeAttributes(HTMLAttributes, {
-      "data-type": "vellix-plain-callout", class: "vellix-plain-callout",
-      "data-callout-color": color, style: `--vellix-callout-color:${color};`,
-    }), ["button", {
-      type: "button", class: "vellix-plain-callout-color-button", contenteditable: "false",
-      "aria-label": "Change callout color",
-    }], ["div", { class: "vellix-plain-callout-text" }, 0]];
+      "data-type": "vellix-plain-callout", class: "vellix-plain-callout penned-plain-callout",
+      "data-callout-color": settings.color, "data-callout-text-color": settings.textColor,
+      "data-callout-minimum-height": settings.minimumHeight, style: plainCalloutSurface(settings),
+    }), ["div", { class: "vellix-callout-text vellix-plain-callout-text" }, 0]];
   },
   addKeyboardShortcuts() {
     return {
@@ -1188,7 +1143,9 @@ const PlainCallout = Node.create({
         const selection = editor.state.selection;
         const { $from, $to } = selection;
         for (let depth = $from.depth; depth > 0; depth -= 1) {
-          if ($from.node(depth).type.name !== "plainCallout") continue;
+          const callout = $from.node(depth);
+          if (callout.type.name !== "plainCallout") continue;
+          if (!clipSource(callout.attrs.clipSource)) return false;
           if (!editor.isEditable || selectionMode !== "off") return true;
           if ($from.depth !== depth + 1 || $from.parent.type.spec.code || !$from.sameParent($to)) return false;
 
@@ -1214,39 +1171,36 @@ const Divider = Node.create({
             element.getAttribute("data-divider-style") ||
               element.getAttribute("data-vellix-divider-style")
           ),
-        renderHTML: (attributes) => ({
-          "data-divider-style": normalizedDividerStyle(attributes.style),
-        }),
+        rendered: false,
       },
+      color: { default: null, rendered: false, parseHTML: element => dividerColor(element.getAttribute("data-divider-color")) },
+      tapeSize: { default: null, rendered: false, parseHTML: element => {
+        const size = element.getAttribute("data-tape-size");
+        return size === null ? null : washiTapeSize(size);
+      } },
+      imagePath: { default: null, rendered: false, parseHTML: element => {
+        const src = element.querySelector(".vellix-divider-tape img")?.getAttribute("src");
+        try {
+          const url = new URL(src);
+          const path = url.searchParams.get("path");
+          return url.protocol === "penned-file:" && url.host === "file" && attachmentURL({ relativePath: path }) ? path : null;
+        } catch { return null; }
+      } },
+      remotePhoto: { default: null, rendered: false, parseHTML: element => {
+        try { return dividerPhoto(JSON.parse(element.getAttribute("data-divider-photo"))); }
+        catch { return null; }
+      } },
     };
   },
   parseHTML() {
     return [{ tag: "div[data-vellix-divider]" }, { tag: "hr[data-vellix-divider]" }];
   },
   renderHTML({ node, HTMLAttributes }) {
-    const style = normalizedDividerStyle(node?.attrs?.style);
-    const content =
-      style === "dottedCircles"
-        ? [
-            "span",
-            { class: "vellix-divider-dots", "aria-hidden": "true" },
-          ]
-        : style === "fourCircles"
-          ? [
-              "span",
-              { class: "vellix-divider-four-circles", "aria-hidden": "true" },
-              ...Array.from({ length: 4 }, () => ["span", { class: "vellix-divider-circle" }]),
-            ]
-          : ["span", { class: "vellix-divider-line", "aria-hidden": "true" }];
-
-    return [
-      "div",
-      mergeAttributes(HTMLAttributes, {
-        "data-vellix-divider": "true",
-        "data-divider-style": style,
-      }),
-      content,
-    ];
+    const photo = node.attrs.style === "washiTape" ? dividerPhoto(node.attrs.remotePhoto) : null;
+    const path = node.attrs.imagePath;
+    const src = node.attrs.style === "washiTape"
+      ? photo?.imageURL || (typeof path === "string" ? attachmentURL({ relativePath: path }) : "") : "";
+    return dividerDOM(node.attrs, src, { ...HTMLAttributes, "data-divider-photo": photo ? JSON.stringify(photo) : null });
   },
 });
 
@@ -1327,7 +1281,31 @@ const ToggleItem = Node.create({
           if ($from.depth < childDepth) return false;
           const isFirstChild = $from.index(depth) === 0;
           const isAtEnd = $from.parentOffset === $from.parent.content.size;
-          if (!isFirstChild || !isAtEnd) return false;
+          if (!isFirstChild) {
+            // The editor's default Enter split is a silent no-op inside a toggle
+            // body, so perform the split here. A real split carries any trailing
+            // text into the new block; when the schema disallows a split at this
+            // position, insert an empty paragraph right after the current block
+            // instead. Mirrors the summary-line behavior above and keeps the new
+            // line inside the toggle.
+            const splitPos = $from.pos;
+            const afterBlock = $from.after($from.depth);
+            return editor.chain().focus().command(({ tr, state, dispatch }) => {
+              if (canSplit(state.doc, splitPos)) {
+                if (dispatch) dispatch(tr.split(splitPos).scrollIntoView());
+                return true;
+              }
+              const paragraph = state.schema.nodes.paragraph;
+              if (!paragraph) return false;
+              if (dispatch) {
+                tr.insert(afterBlock, paragraph.create());
+                tr.setSelection(TextSelection.near(tr.doc.resolve(afterBlock + 1)));
+                dispatch(tr.scrollIntoView());
+              }
+              return true;
+            }).run();
+          }
+          if (!isAtEnd) return false;
 
           const toggleNode = $from.node(depth);
           const togglePos = $from.before(depth);
@@ -1536,14 +1514,13 @@ let lastSelectionHandleEvent = { key: "", time: 0 };
 let lastHeight = -1;
 let contentHeightFrame = null, lastContentHeightFrame = -1;
 let lastVisualContentBottom = -1;
-// The reported height only changes when the editor content box resizes, so a
-// ResizeObserver flips this true and the measurement runs then. Same-line typing
-// leaves it false and skips the forced getBoundingClientRect height read entirely.
-let contentSizeDirty = true;
+const isMeasuredFeature = node => node.type.name === "pageBreak" || node.type.name === "collection";
+let measuredFeatureIndex = null;
 let lastSelectionCount = -1;
 let lastPageBreakSignature = "";
 let lastNativeCollectionSignature = "";
-let saveTimer;
+let saveTimer, maxSaveTimer, pendingUpdateDoc = null, pendingTextOnly = true;
+let supportsTextCheckpoints = false;
 
 const templateComponents = createTemplateComponents({ Node, post: postToSwift,
   snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
@@ -1557,14 +1534,81 @@ const textColor = createTextColor({ ...textColorDependencies, post: postToSwift,
   snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
 const listGridModule = createListGrid({ post: postToSwift,
   snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
+const codeBlocks = createCodeBlocks({ post: postToSwift, selectionActive: () => selectionMode !== "off", closeHistory });
 const ListGridGuard = Extension.create({ name: "vellixListGridGuard", addProseMirrorPlugins: () => listGridModule.plugins });
+const tabsModule = createTabs({ post: postToSwift,
+  snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off",
+  reportHeight: () => requestAnimationFrame(reportContentHeight) });
+const TabsGuard = Extension.create({ name: "vellixTabsGuard", addProseMirrorPlugins: () => tabsModule.plugins });
+const minimalFieldsModule = createMinimalFields({ post: postToSwift,
+  snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
+const MinimalFieldsGuard = Extension.create({ name: "vellixMinimalFieldsGuard", addProseMirrorPlugins: () => minimalFieldsModule.plugins });
+const informationCardModule = createInformationCard({ post: postToSwift, snapshot: () => snapshotPayload(), selectionActive: () => selectionMode !== "off" });
+let linkEditingEnabled = true;
+const documentLinks = createDocumentLinks({ post: postToSwift, canEdit: () => linkEditingEnabled, id,
+  selectionActive: () => selectionMode !== "off",
+  selectedBlock: () => selection.size === 1 ? (window.PennedBlockSelection?.selectedRecords()?.[0]
+    ?? selectedBlockIndexMap().values().next().value) : null,
+  reselect: blockID => {
+    const record = topLevelModelBlocks().find(block => block.node.attrs.id === blockID);
+    if (!record) return;
+    if (selection.size && !selection.has(record.key)) selection.clear();
+    if (selectionMode === "off") setSelectionMode("multi");
+    if (!selection.has(record.key)) selection.add(record.key);
+    setSelectionClasses(); reportFormattingState();
+  },
+});
+// Block containers that hold multiple blocks and whose Enter behavior is a plain
+// "new block" split, but which define no Enter handler of their own and so relied
+// on the editor's default split. That default is a silent no-op inside a container
+// (same regression the toggle hit), so this extension performs the split for them.
+// Containers with intentional Enter behavior are deliberately excluded: clipped
+// callouts, listItem/taskItem, codeBlock, caption, table, and toggleItem (which
+// handles its own Enter). Nested blocks are matched by their DIRECT parent, so a
+// paragraph inside a toggle inside a card is still handled by the toggle.
+const BLOCK_SPLIT_CONTAINERS = new Set([
+  "blockquote", "iconCallout", "plainCallout", "informationCardBody", "minimalFieldValue", "tabPanel",
+]);
+const BlockContainerEnterFix = Extension.create({
+  name: "blockContainerEnterFix",
+  priority: 1000,
+  addKeyboardShortcuts() {
+    return {
+      Enter: ({ editor }) => {
+        const { $from, empty } = editor.state.selection;
+        if (!empty || $from.depth < 2) return false;
+        const parent = $from.node($from.depth - 1);
+        if (!BLOCK_SPLIT_CONTAINERS.has(parent.type.name) ||
+            (parent.type.name === "plainCallout" && clipSource(parent.attrs.clipSource))) return false;
+        const splitPos = $from.pos;
+        const afterBlock = $from.after($from.depth);
+        return editor.chain().focus().command(({ tr, state, dispatch }) => {
+          if (canSplit(state.doc, splitPos)) {
+            if (dispatch) dispatch(tr.split(splitPos).scrollIntoView());
+            return true;
+          }
+          const paragraph = state.schema.nodes.paragraph;
+          if (!paragraph) return false;
+          if (dispatch) {
+            tr.insert(afterBlock, paragraph.create());
+            tr.setSelection(TextSelection.near(tr.doc.resolve(afterBlock + 1)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        }).run();
+      },
+    };
+  },
+});
 const editor = new Editor({
   element: document.getElementById("editor"),
   extensions: [
+    BlockContainerEnterFix,
     textColor.mark, textColor.integration,
     CaretSlots,
     createCalloutListBackspace({ selectionActive: () => selectionMode !== "off" }),
     CalloutRowCleanup,
+    LegacyToggleFollowers,
     calloutRow({ selectionActive: () => selectionMode !== "off" }),
     ...(window.PennedBlockSelection?.extensions({ Extension, Plugin, PluginKey, Decoration, DecorationSet,
       closeHistory, post: postToSwift, modeChanged: mode => { selectionMode = mode; } }) ?? []),
@@ -1584,16 +1628,31 @@ const editor = new Editor({
     documentTags.integration,
     ...listGridModule.nodes,
     ListGridGuard,
+    ...tabsModule.nodes,
+    TabsGuard,
+    ...minimalFieldsModule.nodes,
+    ...informationCardModule.nodes,
+    documentLinks.node,
+    documentLinks.integration,
+    MinimalFieldsGuard,
     StarterKit.configure({
+      heading: false,
+      link: { openOnClick: false },
       listItem: false,
       blockquote: false,
       code: false,
+      codeBlock: false,
       document: false,
       horizontalRule: false,
       trailingNode: false,
     }),
+    createLabelHeading({
+      interactive: true,
+      iconMask: name => `var(${iconAssetCSSVariable(name)}, ${cssBackgroundImageSource(iconSource(name))})`,
+    }),
     PennedListItem,
     UnderlineableCode,
+    codeBlocks.node,
     TaskList,
     VellixTaskItem,
     createTaskIntegration({ Extension, Plugin, PluginKey, post: postToSwift,
@@ -1601,7 +1660,8 @@ const editor = new Editor({
     Placeholder.configure({ placeholder: "" }),
     BlockID,
     SelectionTextHighlight,
-    Callout,
+    GridCard,
+    IconCallout,
     PlainCallout,
     VellixBlockquote,
     Divider,
@@ -1623,14 +1683,26 @@ const editor = new Editor({
       spellcheck: "false",
     },
   },
-  onUpdate: ({ editor, transaction }) => {
-    updateMeasuredFeatures(transaction);
-    renderChangedCalloutIcons(transaction);
+  onUpdate: ({ editor, transaction, appendedTransactions = [] }) => {
+    const changes = [transaction, ...appendedTransactions].filter(tr => tr.docChanged);
+    const textOnly = changes.length > 0 && changes.every(inlineTextEdit);
+    if (!textOnly) {
+      if (changes.length === 1 && changes[0].doc === editor.state.doc) renderChangedCalloutIcons(changes[0]);
+      else renderCalloutIcons();
+      // A structural edit can move a native overlay without changing total height.
+      reportContentHeight();
+    }
     if (window.PENNED_EDITOR_DIAGNOSTICS === true) traceCalloutAttrs("onUpdate-after-transaction", editor.getJSON());
-    scheduleUpdate(editor);
-    reportContentHeight();
+    // Snapshot normalization can drop a text-empty blockquote next to a page
+    // break. Let native reconcile relationships for those edits as well.
+    const stableSnapshotStructure = textOnly && changes.every(tr =>
+      tr.steps.every((step, index) => tr.docs[index].resolve(step.from).node(1).type.name !== "blockquote"));
+    scheduleUpdate(editor.state.doc, stableSnapshotStructure);
   },
-  onTransaction: ({ editor, transaction }) => {
+  onTransaction: ({ editor, transaction, appendedTransactions = [] }) => {
+    for (const tr of [transaction, ...appendedTransactions]) {
+      if (measuredFeatureIndex) updateMeasuredFeatures(tr);
+    }
     if (window.PENNED_EDITOR_DIAGNOSTICS !== true) return;
     traceCalloutAttrs("onTransaction", editor.getJSON(), {
       docChanged: transaction.docChanged,
@@ -1639,10 +1711,10 @@ const editor = new Editor({
     });
   },
   onFocus: () => postToSwift("focus", { focused: true }),
-  onBlur: () => { clearUnusedCaretSlots(editor); postToSwift("focus", { focused: false }); },
+  onBlur: () => { clearUnusedCaretSlots(editor); flushScheduledUpdate(); postToSwift("focus", { focused: false }); },
 });
 
-const caretTracking = createCaretTracking({ editor, post: postToSwift, reportHeight: reportContentHeight,
+const caretTracking = createCaretTracking({ editor, post: postToSwift, verticalOnly: !!window.PennedBlockSelection,
   selectionActive: () => selectionMode !== "off" });
 
 // Drive the height measurement from the content box resizing rather than from
@@ -1652,7 +1724,27 @@ const caretTracking = createCaretTracking({ editor, post: postToSwift, reportHei
 // removes the per-keystroke forced layout that dominated long-document editing;
 // same-line typing now triggers no height read at all.
 if (typeof ResizeObserver === "function" && editor?.view?.dom) {
-  new ResizeObserver(() => { contentSizeDirty = true; reportContentHeight(); }).observe(editor.view.dom);
+  const contentObserver = new ResizeObserver(reportContentHeight);
+  contentObserver.observe(editor.view.dom);
+  let activeBlock, activePosition;
+  const observeActiveBlock = (force = false) => {
+    const { $head } = editor.state.selection;
+    const position = $head.depth && $head.parent.isTextblock ? $head.before() : null;
+    if (!force && position === activePosition) return;
+    activePosition = position;
+    const next = position === null ? null : editor.view.nodeDOM(position);
+    if (next === activeBlock) return;
+    if (activeBlock instanceof Element) contentObserver.unobserve(activeBlock);
+    activeBlock = next;
+    // Text inside a column can wrap while the whole editor keeps the same height.
+    if (activeBlock instanceof Element) contentObserver.observe(activeBlock);
+  };
+  editor.on("selectionUpdate", () => observeActiveBlock());
+  editor.on("focus", () => observeActiveBlock(true));
+  editor.on("transaction", ({ transaction, appendedTransactions = [] }) => {
+    if ([transaction, ...appendedTransactions].some(tr => tr.docChanged && !inlineTextEdit(tr))) observeActiveBlock(true);
+  });
+  editor.on("destroy", () => contentObserver.disconnect());
 }
 
 function isCalloutProbeElement(element) {
@@ -1744,10 +1836,18 @@ if (editorElement && window.PENNED_EDITOR_DIAGNOSTICS === true) {
 // reuse a snapshot without serializing and normalizing every block again.
 let snapshotDocument = null;
 let cachedSnapshot = null;
+const snapshotNodes = new WeakMap();
 function snapshotPayload() {
   const currentDocument = editor.state.doc;
   if (snapshotDocument === currentDocument && cachedSnapshot) return cachedSnapshot;
-  const documentJSON = normalizeTipTapDocument(documentWithoutUnusedCaretSlots(editor.state).toJSON());
+  const doc = documentWithoutUnusedCaretSlots(editor.state);
+  const blocks = [];
+  doc.forEach(node => {
+    if (!snapshotNodes.has(node)) snapshotNodes.set(node, normalizeTipTapNode(node.toJSON()));
+    blocks.push(snapshotNodes.get(node));
+  });
+  const projection = doc.attrs.taskHistoryProjection;
+  const documentJSON = { type: "doc", ...(projection ? { attrs: { taskHistoryProjection: projection } } : {}), content: normalizedDocumentContent(blocks) };
   // Word/character counts are recomputed natively during save (TipTapContentAnalyzer)
   // and are ignored on "update"/"snapshot" messages.
   snapshotDocument = currentDocument;
@@ -1755,12 +1855,33 @@ function snapshotPayload() {
   return cachedSnapshot;
 }
 
-function scheduleUpdate() {
+function cancelScheduledUpdate() {
   window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    postToSwift("update", snapshotPayload());
-  }, 500);
+  window.clearTimeout(maxSaveTimer);
+  saveTimer = maxSaveTimer = undefined;
+  pendingUpdateDoc = null;
+  pendingTextOnly = true;
 }
+
+function flushScheduledUpdate() {
+  if (!pendingUpdateDoc || editor.isDestroyed) return;
+  const textOnly = pendingTextOnly && pendingUpdateDoc === editor.state.doc;
+  cancelScheduledUpdate();
+  const snapshot = snapshotPayload();
+  if (textOnly && supportsTextCheckpoints) postToSwift("update", { textDocumentJSON: JSON.stringify(snapshot.document) });
+  else postToSwift("update", snapshot);
+}
+
+function scheduleUpdate(doc, textOnly) {
+  pendingUpdateDoc = doc;
+  pendingTextOnly &&= textOnly;
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(flushScheduledUpdate, 500);
+  maxSaveTimer ??= window.setTimeout(flushScheduledUpdate, 4000);
+}
+
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushScheduledUpdate(); });
+editor.on("destroy", cancelScheduledUpdate);
 
 function roundedRectNumber(value) {
   return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
@@ -2142,7 +2263,8 @@ function selectionHighlightRect(outer) {
   } else if (nodeType === "divider" || outer.matches?.("[data-vellix-divider]")) {
     contentRect = outerRect;
   } else if (
-    nodeType === "callout" ||
+    nodeType === "gridCard" ||
+    nodeType === "iconCallout" ||
     nodeType === "plainCallout" ||
     nodeType === "pageBreak" ||
     nodeType === "toggleItem" ||
@@ -2179,6 +2301,14 @@ function selectionRecordForEvent(event) {
   if (selectionMode === "off" || !editor.view.dom.contains(event.target)) return null;
 
   const records = selectableBlockRecords();
+  // Tabs are a single top-level block. In block-selection mode, their title
+  // and exposed card border select the parent, while panel text retains its
+  // own text-selection behavior outside block-selection mode.
+  const tabs = event.target.closest?.(".penned-tabs[data-tabs]");
+  if (tabs && (event.target === tabs || event.target.closest?.(".penned-tabs-header"))) {
+    const tabsRecord = records.find(record => record.node.type.name === "tabs" && record.element === tabs);
+    if (tabsRecord) return tabsRecord;
+  }
   const closestBlock = event.target.closest?.("[data-vellix-selection-block='true']");
   if (
     closestBlock instanceof HTMLElement &&
@@ -2351,6 +2481,7 @@ function setSelectionMode(mode) {
   templateComponents.refresh();
   if (selectionMode === "off") selection.clear();
   if (selectionMode !== "off") {
+    hideSlashMenu();
     attachments.command(editor, "attachmentPauseAll", {});
     editor.commands.blur();
   }
@@ -2437,22 +2568,19 @@ function reportContentHeight(timestamp) {
   measureContentHeight();
 }
 
-// Track only feature nodes, rather than walking every paragraph each time
-// the document changes. The index maps unchanged nodes through transactions.
-const isMeasuredFeature = node => node.type.name === "pageBreak" || node.type.name === "collection";
-let measuredFeatureIndex = null;
-function documentFeaturePresence() {
+function measuredFeatureRecords() {
   const doc = editor.state.doc;
   if (!measuredFeatureIndex || measuredFeatureIndex.doc !== doc) {
     measuredFeatureIndex = createNodeIndex(doc, isMeasuredFeature);
   }
-  return {
-    pageBreaks: measuredFeatureIndex.records.some(record => record.node.type.name === "pageBreak"),
-    collections: measuredFeatureIndex.records.some(record => record.node.type.name === "collection"),
-  };
+  return measuredFeatureIndex.records;
 }
 function updateMeasuredFeatures(transaction) {
   if (!transaction.docChanged) return;
+  if (measuredFeatureIndex.doc === transaction.before && !measuredFeatureIndex.records.length && inlineTextEdit(transaction)) {
+    measuredFeatureIndex = { doc: transaction.doc, records: [], changed: [] };
+    return;
+  }
   measuredFeatureIndex = updateNodeIndex(measuredFeatureIndex, transaction, isMeasuredFeature);
 }
 
@@ -2460,42 +2588,30 @@ function measureContentHeight() {
   const root = document.querySelector(".vellix-editor-page");
   const content = editor?.view?.dom;
 
-  // The height measurement reads getBoundingClientRect on the full editor DOM,
-  // which forces a synchronous document-wide layout. Only do it when the content
-  // box actually resized (the ResizeObserver sets contentSizeDirty); same-line
-  // typing cannot change the height, so it skips this entirely.
-  if (contentSizeDirty) {
-    contentSizeDirty = false;
-    let height = 60;
-    let visualContentBottom = 60;
-    if (root && content instanceof HTMLElement && isVisibleElement(content)) {
-      const top = root.getBoundingClientRect().top;
-      // Keep the WKWebView aligned to the complete rendered editor DOM so empty
-      // surface taps remain inside the web view and can create a paragraph.
-      const bottom = content.getBoundingClientRect().bottom;
-      height = Math.max(60, Math.ceil(bottom - top + 2));
-      visualContentBottom = Math.min(height, reportedVisualContentBottom(root, content));
-    }
-
-    if (
-      Math.abs(height - lastHeight) > 1 ||
-      Math.abs(visualContentBottom - lastVisualContentBottom) > 1
-    ) {
-      lastHeight = height;
-      lastVisualContentBottom = visualContentBottom;
-      postToSwift("height", { height, visualContentBottom });
-    }
+  let height = 60;
+  let visualContentBottom = 60;
+  if (root && content instanceof HTMLElement && isVisibleElement(content)) {
+    const top = root.getBoundingClientRect().top;
+    const bottom = content.getBoundingClientRect().bottom;
+    height = Math.max(60, Math.ceil(bottom - top + 2));
+    visualContentBottom = Math.min(height, reportedVisualContentBottom(root, content));
   }
 
-  const features = documentFeaturePresence();
-  if (features.pageBreaks || lastPageBreakSignature !== JSON.stringify([])) {
-    if (features.pageBreaks) reportPageBreakRegions(root, content);
-    else {
-      lastPageBreakSignature = JSON.stringify([]);
-      postToSwift("pageBreaks", { regions: [] });
-    }
+  if (Math.abs(height - lastHeight) > 1 || Math.abs(visualContentBottom - lastVisualContentBottom) > 1) {
+    lastHeight = height;
+    lastVisualContentBottom = visualContentBottom;
+    postToSwift("height", { height, visualContentBottom });
   }
-  const regions = features.collections ? nativeCollectionRegions(root) : [];
+
+  const pageBreaks = [], collections = [];
+  for (const { node, pos } of measuredFeatureRecords()) {
+    const element = editor.view.nodeDOM(pos);
+    if (!(element instanceof HTMLElement)) continue;
+    if (node.type.name === "pageBreak") pageBreaks.push(element);
+    else if (element.hasAttribute("data-native-collection")) collections.push(element);
+  }
+  reportPageBreakRegions(root, pageBreaks);
+  const regions = collections.length ? nativeCollectionRegions(root, collections) : [];
   const signature = JSON.stringify(regions);
   if (signature !== lastNativeCollectionSignature) {
     lastNativeCollectionSignature = signature;
@@ -2503,19 +2619,9 @@ function measureContentHeight() {
   }
 }
 
-function reportPageBreakRegions(root, content) {
+function reportPageBreakRegions(root, candidates) {
   if (!root) return;
-  const rootRect = root.getBoundingClientRect();
-  const selector = "[data-vellix-page-break], [data-type='pageBreak'], [data-page-break]";
-  // Page breaks are schema-restricted to the top level (doc content is
-  // "(block | pageBoundary)+"; nested containers accept only "block+"), so they are
-  // always direct children of the editor DOM. Scanning those children instead of a
-  // whole-document attribute-selector query keeps this per-frame measure O(top-level
-  // blocks) rather than O(all elements). Fall back to a full query if the editor DOM
-  // is unavailable, so a page break can never be missed.
-  const candidates = content instanceof HTMLElement
-    ? Array.from(content.children).filter((element) => element.matches?.(selector))
-    : Array.from(root.querySelectorAll(selector));
+  const rootRect = candidates.length ? root.getBoundingClientRect() : null;
   const regions = candidates
     .filter((element) => {
       const style = window.getComputedStyle(element);
@@ -2552,8 +2658,8 @@ function selectedBlockIndexMap() {
   }, new Map());
 }
 
-function transformSelectedTopLevelBlocks(transform) {
-  const mobileResult = window.PennedBlockSelection?.transformSelectedNested(transform);
+function transformSelectedTopLevelBlocks(transform, includeTopLevel = false) {
+  const mobileResult = window.PennedBlockSelection?.transformSelectedNested(transform, includeTopLevel);
   if (mobileResult !== undefined) {
     if (mobileResult) postToSwift("snapshot", snapshotPayload());
     return mobileResult;
@@ -2601,79 +2707,117 @@ function commitDocument(nextDocument, deletionRanges = null) {
   postToSwift("update", snapshotPayload());
 }
 
-function transformNodeToBlock(node, type, payload = {}) {
+function cardConversionJSON(node, type) {
+  if (node.type === type) return node;
   const blockID = nodeId(node);
-  const content = taggedInlineContent(node) ?? inlineContent(plainText(node));
+  if (type === "gridCard") {
+    const body = node.type === "codeBlock" ? { ...node, attrs: { ...node.attrs, id: id() } } : paragraph(node.content);
+    return newGridCard(blockID, body);
+  }
+  const card = informationCardJSON();
+  const [title, description, body] = card.content;
+  card.attrs.id = blockID;
+  title.content = node.type === "heading" ? node.content ?? [] : [];
+  description.content = ["paragraph", "caption"].includes(node.type) ? node.content ?? [] : [];
+  body.content = node.type === "codeBlock" ? [{ ...node, attrs: { ...node.attrs, id: id() } }] : [paragraph()];
+  return card;
+}
+
+editor.storage.pennedCardConversion = (node, type) => editor.schema.nodeFromJSON(cardConversionJSON(node.toJSON(), type));
+
+function transformNodeToBlock(node, type, payload = {}) {
+  const heading = /^(text|label)Heading([1-4])$/.exec(type);
+  if (heading) return transformNodeToBlock(node, "heading", { ...payload, level: Number(heading[2]), presentation: heading[1] });
+  const blockID = nodeId(node);
+  const isTextStyle = value => ["paragraph", "heading", "caption"].includes(value);
+  const preservesInline = isTextStyle(node.type);
+  const content = preservesInline ? node.content : taggedInlineContent(node) ?? inlineContent(plainText(node));
+  const textStyleAttrs = preservesInline
+    ? { id: blockID, textAlign: node.attrs?.textAlign, indent: node.attrs?.indent, blockFont: node.attrs?.blockFont }
+    : { id: blockID };
   if (node.type === "listItem" && type === "heading") {
     const [first, ...rest] = node.content || [];
     return { ...node, content: [transformNodeToBlock(first || paragraph(), type, payload), ...rest] };
   }
   switch (type) {
     case "caption":
-      return { type: "caption", attrs: { id: blockID }, content };
+      return { type: "caption", attrs: textStyleAttrs, content };
     case "heading":
       return {
         type: "heading",
         attrs: {
-          id: blockID,
+          ...textStyleAttrs,
           level: Math.max(1, Math.min(6, Number(payload.level) || 3)),
+          ...(payload.presentation === "label" || (node.type === "heading" && node.attrs.label)
+            ? { label: { ...labelSettings(node.type === "heading" ? node.attrs.label : null),
+              ...(payload.presentation ? { presentation: payload.presentation } : {}) } } : {}),
         },
         content,
       };
     case "quote":
-      return { type: "blockquote", attrs: { id: blockID }, content: [paragraph(content)] };
-    case "callout":
-      return {
-        type: "callout",
-        attrs: {
-          id: blockID,
-          icon: payload.icon || DEFAULT_CALLOUT_ICON,
-          color: payload.color || DEFAULT_CALLOUT_COLOR,
-        },
-        content: [paragraph(content)],
-      };
+      return { type: "blockquote", attrs: { id: id() }, content: [paragraph(content, textStyleAttrs)] };
     case "plainCallout":
       return {
         type: "plainCallout",
         attrs: { id: blockID, color: payload.color || DEFAULT_CALLOUT_COLOR },
-        content: [paragraph(content)],
+        content: [paragraph(content, { ...textStyleAttrs, id: id() })],
       };
     case "checkListItem":
       return {
         type: "taskList",
-        attrs: { id: blockID },
+        attrs: { id: id() },
         content: [{
           type: "taskItem",
           attrs: { id: id(), checked: false, crossed: false },
-          content: [paragraph(content)],
+          content: [paragraph(content, textStyleAttrs)],
         }],
       };
     case "bulletListItem":
       return {
         type: "bulletList",
-        attrs: { id: blockID },
-        content: [{ type: "listItem", attrs: { id: id() }, content: [paragraph(content)] }],
+        attrs: { id: id() },
+        content: [{ type: "listItem", attrs: { id: id() }, content: [paragraph(content, textStyleAttrs)] }],
       };
     case "numberedListItem":
       return {
         type: "orderedList",
         attrs: { id: id() },
         content: [{ type: "listItem", attrs: { id: id() }, content: [
-          node.type === "heading" ? node : paragraph(content, { id: blockID }),
+          node.type === "heading" ? node : paragraph(content, textStyleAttrs),
         ] }],
       };
     case "toggleListItem":
-      return { type: "toggleItem", attrs: { id: blockID, open: true }, content: [
-        payload.level ? { type: "heading", attrs: { id: id(), level: Math.max(1, Math.min(6, Number(payload.level) || 1)) }, content } : paragraph(content),
+      return { type: "toggleItem", attrs: { id: id(), open: true }, content: [
+        payload.level ? { type: "heading", attrs: { ...textStyleAttrs, level: Math.max(1, Math.min(6, Number(payload.level) || 1)) }, content } : paragraph(content, textStyleAttrs),
       ] };
     case "codeBlock":
       return { type: "codeBlock", attrs: { id: blockID }, content: inlineContent(plainText(node)) };
+    case "gridCard":
+    case "informationCard":
+      return cardConversionJSON(node, type);
     default:
-      return paragraph(content, { id: blockID });
+      return paragraph(content, textStyleAttrs);
   }
 }
 
 function transformSelectedBlocks(type, payload = {}) {
+  if (type === "gridCard" || type === "informationCard" || /^(text|label)Heading[1-4]$/.test(type)) {
+    const blocks = window.PennedBlockSelection?.selectedRecords?.() ?? topLevelModelBlocks().filter(block => selection.has(block.key));
+    const accepted = new Set(["paragraph", "heading", "caption", "codeBlock", type]);
+    if (!blocks.length) return false;
+    if (blocks.some(({ node }) => !accepted.has(node.type.name))) {
+      postToSwift("error", { message: "Select text blocks for this conversion." });
+      return false;
+    }
+    for (const { node, pos } of blocks) {
+      const replacement = editor.schema.nodeFromJSON(transformNodeToBlock(node.toJSON(), type, payload));
+      const $pos = editor.state.doc.resolve(pos);
+      if (!$pos.parent.canReplace($pos.index(), $pos.index() + 1, Fragment.from(replacement))) {
+        postToSwift("error", { message: "This block type is not supported inside this container." });
+        return false;
+      }
+    }
+  }
   if (type === "numberedListItem") {
     const blocks = topLevelModelBlocks().filter(block => selection.has(block.key));
     if (blocks.length && blocks.every(block => block.node.isTextblock || block.node.type.name === "listItem")) {
@@ -2691,7 +2835,7 @@ function transformSelectedBlocks(type, payload = {}) {
       return true;
     }
   }
-  transformSelectedTopLevelBlocks((node) => transformNodeToBlock(node, type, payload));
+  return transformSelectedTopLevelBlocks((node) => transformNodeToBlock(node, type, payload), true);
 }
 
 function dividerConversionSelection(doc, blocks) {
@@ -2761,28 +2905,63 @@ function convertSelectedDividers(style) {
 
 function updateSelectedCalloutColor(color) {
   transformSelectedTopLevelBlocks((node) => {
-    if (node.type === "callout" || node.type === "plainCallout") {
+    if (node.type === "gridCard") return node;
+    if (node.type === "iconCallout") {
+      return { ...node, attrs: { ...node.attrs, backgroundColor: iconCalloutSettings({ backgroundColor: color }).backgroundColor } };
+    }
+    if (node.type === "plainCallout") {
       return { ...node, attrs: { ...node.attrs, color } };
     }
-    const callout = transformNodeToBlock(node, "callout", { color });
-    return { ...callout, attrs: { ...callout.attrs, color } };
+    return transformNodeToBlock(node, "plainCallout", { color });
   });
 }
 
-function updateCalloutIcon(blockId, icon) {
-  const selectedByPath = selectedBlockIndexMap();
-  if (!blockId && !selectedByPath.size) {
-    postToSwift("error", { message: "Select at least one block first." });
-    return;
-  }
-  const targets = new Set([...selectedByPath.values()].map(block => block.node?.attrs?.id || block.json?.attrs?.id));
-  const tr = editor.state.tr;
+function findGridCard(blockID, type = "gridCard") {
+  if (!blockID) return null;
+  let found = null;
   editor.state.doc.descendants((node, pos) => {
-    if (node.type.name === "callout" && (blockId ? node.attrs.id === blockId : targets.has(node.attrs.id))) {
-      tr.setNodeMarkup(pos, undefined, { ...node.attrs, icon: icon || DEFAULT_CALLOUT_ICON });
-    }
+    if (found) return false;
+    if (node.type.name === type && node.attrs.id === blockID) found = { node, pos };
+    return !found;
   });
-  if (tr.docChanged) editor.view.dispatch(tr);
+  return found;
+}
+
+function requestGridCard(blockID, type = "gridCard") {
+  if (!editor.isEditable || selectionMode !== "off") return false;
+  const target = findGridCard(blockID, type);
+  if (!target || (type === "plainCallout" && clipSource(target.node.attrs.clipSource))) return false;
+  editor.commands.blur();
+  postToSwift(type === "gridCard" ? "gridCardSettings" : "iconCalloutSettings",
+    { blockID, node: target.node.toJSON(), appearance: editorAppearance });
+  return true;
+}
+
+function commitGridCard({ blockID, original, settings, text, originalText }, type = "gridCard") {
+  if (!editor.isEditable || selectionMode !== "off" || !isRecord(settings) || !isRecord(original)) return false;
+  const target = findGridCard(blockID, type);
+  if (!target) return false;
+  if (type === "plainCallout" && clipSource(target.node.attrs.clipSource)) return false;
+  const normalize = type === "plainCallout" ? plainCalloutSettings : type === "iconCallout" ? iconCalloutSettings : gridCardSettings;
+  const before = JSON.stringify(normalize(target.node.attrs));
+  const after = normalize(settings);
+  const attrsChanged = before !== JSON.stringify(after);
+  const textChanged = type !== "gridCard" && typeof text === "string" && text !== originalText;
+  if (attrsChanged || textChanged) {
+    if (before !== JSON.stringify(normalize(original))) return false;
+    const tr = closeHistory(editor.state.tr);
+    if (attrsChanged) tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, ...after });
+    if (textChanged) {
+      const paragraphs = target.node.content.content;
+      if (!paragraphs.every(p => p.type.name === "paragraph" && p.content.content.every(n => n.isText && !n.marks.length)) ||
+          paragraphs.map(p => p.textContent).join("\n") !== originalText) return false;
+      const content = text.replace(/\r\n?/g, "\n").split("\n").map((line, index) =>
+        editor.schema.nodeFromJSON(paragraph(line.length ? [{ type: "text", text: line }] : [], paragraphs[index]?.attrs)));
+      tr.replaceWith(target.pos + 1, target.pos + target.node.nodeSize - 1, Fragment.fromArray(content));
+    }
+    editor.view.dispatch(tr);
+  }
+  return snapshotPayload();
 }
 
 function updateCalloutColor(blockId, color) {
@@ -2792,7 +2971,7 @@ function updateCalloutColor(blockId, color) {
   }
   const tr = editor.state.tr;
   editor.state.doc.descendants((node, pos) => {
-    if (node.attrs.id === blockId && ["callout", "plainCallout"].includes(node.type.name)) {
+    if (node.attrs.id === blockId && node.type.name === "plainCallout") {
       tr.setNodeMarkup(pos, undefined, { ...node.attrs, color: color || DEFAULT_CALLOUT_COLOR });
     }
   });
@@ -2819,60 +2998,61 @@ function updateBlockquoteColor(blockId, color) {
   return true;
 }
 
-function textNodesIn(node) {
-  const result = [];
-  const visit = (value) => {
-    if (!value || typeof value !== "object") return;
-    if (value.type === "text") result.push(value);
-    value.content?.forEach(visit);
-  };
-  visit(node);
-  return result;
-}
-
-function textHasMark(node, markType) {
-  return Array.isArray(node.marks) && node.marks.some((mark) => mark.type === markType);
-}
-
-function setMarkOnNode(node, markType, enabled) {
-  if (!node || typeof node !== "object") return node;
-  if (node.type === "text") {
-    const marks = Array.isArray(node.marks) ? node.marks.filter((mark) => mark.type !== markType) : [];
-    return enabled ? { ...node, marks: [...marks, { type: markType }] } : { ...node, marks };
-  }
-  if (!node.content) return node;
-  return { ...node, content: node.content.map((child) => setMarkOnNode(child, markType, enabled)) };
-}
+const blockMarks = ["bold", "italic", "underline", "strike", "code"];
 
 function formatSelectedBlocks(action, value = null) {
-  if (["indent", "outdent"].includes(action) && movePageReferences(action === "indent" ? 1 : -1)) return true;
-  transformSelectedTopLevelBlocks((node) => {
-    switch (action) {
-      case "codeUnderline":
-      case "bold":
-      case "italic":
-      case "underline":
-      case "strike":
-      case "code": {
-        const mark = action === "codeUnderline" ? "code" : action;
-        const texts = textNodesIn(node);
-        const shouldEnable = texts.length ? !texts.every((textNode) => textHasMark(textNode, mark)) : true;
-        return setMarkOnNode(node, mark, shouldEnable);
+  if (selectionMode === "off" || !selection.size || !linkEditingEnabled) return false;
+  if (["indent", "outdent"].includes(action)) {
+    const direction = action === "indent" ? 1 : -1;
+    if (moveSelectedStructuralBlocks(direction)) return true;
+  }
+  const blocks = window.PennedBlockSelection?.selectedRecords() ?? [...selectedBlockIndexMap().values()];
+  const tr = closeHistory(editor.state.tr);
+  const mark = blockMarks.includes(action) || action === "codeUnderline"
+    ? editor.schema.marks[action === "codeUnderline" ? "code" : action] : null;
+  const text = [];
+  const set = (node, pos, attr, next) => {
+    if (Object.hasOwn(node.attrs, attr) && node.attrs[attr] !== next) tr.setNodeAttribute(pos, attr, next);
+  };
+  for (const { node, pos } of blocks) {
+    if (mark) {
+      if (node.isAtom) continue;
+      node.descendants((child, offset, parent) => {
+        if (child.isText && parent.type.allowsMarkType(mark)) text.push({ child, from: pos + 1 + offset });
+        return !child.isAtom;
+      });
+    } else if (action === "dividerColor" && node.type.name === "divider" && dividerColor(value)) {
+      set(node, pos, "color", dividerColor(value));
+    } else if (action === "headingPresentation" && ["text", "label"].includes(value)) {
+      if (node.type.name === "heading" && labelLevel(node.attrs.level)) {
+        const config = labelSettings(node.attrs.label);
+        if (config.presentation !== value) set(node, pos, "label", { ...config, presentation: value });
       }
-      case "align":
-        return { ...node, attrs: { ...node.attrs, textAlign: value || "left" } };
-      case "indent": {
-        const indent = Math.max(0, Math.min(6, Number(node.attrs?.indent) || 0));
-        return { ...node, attrs: { ...node.attrs, indent: Math.min(6, indent + 1) } };
-      }
-      case "outdent": {
-        const indent = Math.max(0, Math.min(6, Number(node.attrs?.indent) || 0));
-        return { ...node, attrs: { ...node.attrs, indent: Math.max(0, indent - 1) } };
-      }
-      default:
-        return node;
+    } else if (action === "font" && Object.hasOwn(blockFontFamilies, value)) {
+      if (node.isTextblock && !node.isAtom) set(node, pos, "blockFont", value);
+      else if (!node.isAtom) node.descendants((child, offset) => {
+        if (child.isTextblock && !child.isAtom) set(child, pos + 1 + offset, "blockFont", value);
+        return !child.isAtom;
+      });
+    } else if (action === "align" && ["left", "center", "right", "justify"].includes(value)) {
+      set(node, pos, "textAlign", value);
+    } else if (action === "indent" || action === "outdent") {
+      const indent = (Number(node.attrs.indent) || 0) + (action === "indent" ? 1 : -1);
+      set(node, pos, "indent", Math.max(0, Math.min(6, indent)));
     }
-  });
+  }
+  if (mark) {
+    const remove = text.every(({ child }) => mark.isInSet(child.marks));
+    for (const { child, from } of text) {
+      if (remove) tr.removeMark(from, from + child.nodeSize, mark);
+      else tr.addMark(from, from + child.nodeSize, mark.create());
+    }
+  }
+  if (!tr.docChanged) return false;
+  editor.view.dispatch(tr.setMeta("preventAutolink", true));
+  editor.view.dispatch(closeHistory(editor.state.tr));
+  postToSwift("snapshot", snapshotPayload());
+  return true;
 }
 
 function currentSelectionTextblocks() {
@@ -2903,26 +3083,208 @@ function currentSelectionTextblocks() {
   return positions;
 }
 
+function selectedBlocksStyle() {
+  if (selectionMode === "off" || !selection.size) return null;
+  const blocks = window.PennedBlockSelection?.selectedRecords() ?? [...selectedBlockIndexMap().values()];
+  if (!blocks.length) return null;
+
+  const types = new Set();
+  const alignments = new Set();
+  const lists = new Set();
+  const fonts = new Set();
+  const dividerColors = new Set();
+  const seenMarks = new Set(), missingMarks = new Set();
+  const includeFont = node => {
+    if (node.isTextblock && !node.isAtom && Object.hasOwn(node.attrs, "blockFont")) fonts.add(node.attrs.blockFont || "inherit");
+  };
+  for (const { node, type, pos, parentType } of blocks) {
+    if (type === "divider") dividerColors.add(dividerColor(node.attrs.color));
+    types.add(type === "heading" ? `heading${node.attrs.level}`
+      : type === "listItem" || type === "taskItem" ? parentType : type);
+    const resolved = editor.state.doc.resolve(pos);
+    const parent = ["listItem", "taskItem"].includes(parentType) && resolved.depth > 0 ? resolved.node(-1).type.name : parentType;
+    lists.add(listContainerType(parent) ? parent : null);
+    if (Object.hasOwn(node.attrs, "textAlign")) alignments.add(node.attrs.textAlign || "left");
+    includeFont(node);
+    if (node.isAtom) continue;
+    node.descendants((child, _offset, parent) => {
+      includeFont(child);
+      if (!child.isText) return !child.isAtom;
+      for (const name of blockMarks) {
+        const mark = editor.schema.marks[name];
+        if (!mark || missingMarks.has(name) || !parent.type.allowsMarkType(mark)) continue;
+        if (mark.isInSet(child.marks)) seenMarks.add(name);
+        else missingMarks.add(name);
+      }
+      return false;
+    });
+  }
+  return {
+    type: types.size === 1 ? [...types][0] : null,
+    canLabel: blocks.every(({ node }) => node.type.name === "heading" && labelLevel(node.attrs.level)),
+    canColorDivider: dividerColors.size > 0,
+    dividerColor: dividerColors.size === 1 ? [...dividerColors][0] : null,
+    alignment: alignments.size === 1 ? [...alignments][0] : null,
+    list: lists.size === 1 ? [...lists][0] : null,
+    font: fonts.size === 1 ? [...fonts][0] : null,
+    marks: blockMarks.filter(mark => seenMarks.has(mark) && !missingMarks.has(mark)),
+    target: window.PennedBlockSelection?.formattingTarget?.() ?? null,
+  };
+}
+
 let lastFormattingStateSignature = "";
+function settingsKind(node, fromSelectionBar = false) {
+  if (!node.attrs.id) return null;
+  const type = node.type.name;
+  if (["listGrid", "minimalFields", "informationCard", "tabs"].includes(type)) return type;
+  if (type === "heading" && labelLevel(node.attrs.level) && node.attrs.label?.presentation === "label") return "headingLabel";
+  if (type === "plainCallout" && !clipSource(node.attrs.clipSource)) return type;
+  if (!fromSelectionBar) return null;
+  if (["gridCard", "iconCallout", "codeBlock", "blockquote", "taskItem"].includes(type)) return type;
+  if (type === "divider" && node.attrs.style === "washiTape") return "washiTape";
+  if (type === "table" && node.firstChild?.firstChild) return type;
+  if (type === "attachment" && node.attrs.file?.relativePath) return type;
+  if (type === "inlineProperty" && node.attrs.property) return type;
+  if (type === "templateComponent" && templateComponents.canConfigure(node)) return type;
+  if (type === "collection" && node.attrs.collectionID) return type;
+  if (type === "pageReference" && node.attrs.documentID) return "pageCard";
+  return null;
+}
+
+function blockSettingsTarget() {
+  const { $from, $to } = editor.state.selection;
+  if (!editor.isEditable || selectionMode !== "off" || editor.state.selection instanceof NodeSelection) return null;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const node = $from.node(depth);
+    if ($to.depth < depth || $to.start(depth) !== $from.start(depth) || !node.attrs.id) continue;
+    const kind = settingsKind(node);
+    if (kind) return { kind, node };
+  }
+  return null;
+}
+
+function selectedBlockSettingsTarget(link) {
+  const selectionController = window.PennedBlockSelection;
+  if (!selectionController || selectionMode === "off" || editor.options.editable === false || editor.view.composing) return null;
+  const blocks = selectionController.selectedRecords();
+  if (!blocks.length || blocks.some(block => block.type !== blocks[0].type)) return null;
+  const owner = block => {
+    const direct = settingsKind(block.node, true);
+    if (direct) return { kind: direct, node: block.node, pos: block.pos };
+    if (blocks.length === 1 && link && link.blockID === block.node.attrs.id) {
+      return { kind: "documentLink", node: block.node, pos: block.pos };
+    }
+    const position = editor.state.doc.resolve(block.pos);
+    for (let depth = position.depth; depth > 0; depth--) {
+      const node = position.node(depth);
+      const kind = settingsKind(node, true);
+      if (kind) return { kind, node, pos: position.before(depth) };
+    }
+    return null;
+  };
+  const first = owner(blocks[0]);
+  // A multi-selection may point to one settings owner (such as two paragraphs
+  // inside one card), but never choose between different block instances.
+  if (!first || blocks.slice(1).some(block => owner(block)?.pos !== first.pos)) return null;
+  return first;
+}
+
+function requestSelectedBlockSettings(args) {
+  const target = selectedBlockSettingsTarget();
+  if (!target || editor.state.doc.nodeAt(target.pos) !== target.node ||
+      target.kind !== args.kind || target.node.attrs.id !== args.blockID ||
+      !args.selectionTarget || args.selectionTarget !== window.PennedBlockSelection?.formattingTarget()) return false;
+  // Existing settings sheets edit by block identity and require text mode.
+  // Leaving block selection changes no content and does not focus the editor.
+  setSelectionMode("off");
+  if (selectionMode !== "off" || editor.state.doc.nodeAt(target.pos) !== target.node) return false;
+  return requestBlockSettings(target);
+}
+
+function requestBlockSettings(target = blockSettingsTarget()) {
+  if (!target) return false;
+  const { kind, node } = target;
+  const blockId = node.attrs.id;
+  switch (kind) {
+    case "listGrid":
+      return listGridModule.command(editor, "listGridRequestSettings", { blockId });
+    case "minimalFields":
+      return minimalFieldsModule.command(editor, "minimalFieldsRequestSettings", { blockId });
+    case "tabs":
+      return tabsModule.command(editor, "tabsRequestSettings", { blockId });
+    case "informationCard":
+      return informationCardModule.requestSettings(node);
+    case "headingLabel":
+      postToSwift("headingLabelSettings", { blockID: blockId, level: node.attrs.level,
+        text: node.textBetween(0, node.content.size, "", "\n"), settings: labelSettings(node.attrs.label) });
+      return true;
+    case "blockquote":
+      postToSwift("blockquoteColorPickerRequest", { blockId, currentColor: node.attrs.color || DEFAULT_BLOCKQUOTE_COLOR });
+      return true;
+    case "gridCard":
+    case "iconCallout":
+    case "plainCallout":
+      return requestGridCard(blockId, kind);
+    case "codeBlock":
+      return codeBlocks.request(editor, blockId);
+    case "washiTape":
+      return requestWashiTape(blockId);
+    case "table":
+      return window.VellixTables.command("requestSettings", { tableID: blockId });
+    case "attachment":
+      return attachments.requestSettings(node);
+    case "taskItem":
+      postToSwift("taskMenuRequest", taskMenuContext(node));
+      return true;
+    case "inlineProperty":
+      postToSwift("propertyEditorRequest", { blockId, property: node.attrs.property, resumeEditing: false });
+      return true;
+    case "templateComponent":
+      return templateComponents.requestSettings(node);
+    case "collection":
+      postToSwift("collectionRequest", { action: "openCollection", blockID: blockId, collectionID: node.attrs.collectionID });
+      return true;
+    case "pageCard":
+      postToSwift("pageCardSettingsRequest", { documentId: node.attrs.documentID });
+      return true;
+    default:
+      return false;
+  }
+}
+
 function reportFormattingState(force = false) {
-  const available = selectionMode === "off" && editor.isEditable && !(editor.state.selection instanceof NodeSelection);
+  const selection = editor.state.selection;
+  const available = selectionMode === "off" && editor.isEditable && !(selection instanceof NodeSelection);
   const alignments = available
     ? new Set([...currentSelectionTextblocks().values()].map(node => node.attrs.textAlign || "left"))
     : new Set();
+  const parents = new Set();
+  if (available && selection.empty) {
+    for (let depth = 1; depth <= selection.$from.depth; depth++) parents.add(selection.$from.node(depth).type.name);
+  }
+  const inList = name => available && (selection.empty ? parents.has(name) : editor.isActive(name));
+  const isTrailingListLine = available && selection.empty && trailingNumberedLine(editor.state);
+  const linkFormatting = documentLinks.formatting(editor);
+  const selectedSettings = selectedBlockSettingsTarget(linkFormatting.selectedLink);
   const state = {
     ...textColor.formattingState(editor),
+    ...linkFormatting,
+    selectedBlocksStyle: selectedBlocksStyle(),
+    canOpenListGridSettings: available && !!listGridModule.selectedGridID(editor),
+    blockSettingsKind: blockSettingsTarget()?.kind ?? null,
+    selectedBlockSettings: selectedSettings ? {
+      kind: selectedSettings.kind, blockID: selectedSettings.node.attrs.id,
+      selectionTarget: window.PennedBlockSelection.formattingTarget(),
+    } : null,
     bold: available && editor.isActive("bold"),
     italic: available && editor.isActive("italic"),
     underline: available && editor.isActive("underline"),
     strike: available && editor.isActive("strike"),
     code: available && editor.isActive("code"),
     alignment: alignments.size === 1 ? [...alignments][0] : null,
-    checklist: available && editor.isActive("taskList") &&
-      !(editor.state.selection.empty && trailingNumberedLine(editor.state)),
-    bulletList: available && editor.isActive("bulletList") &&
-      !(editor.state.selection.empty && trailingNumberedLine(editor.state)),
-    numberList: available && editor.isActive("orderedList") && !emptyNumberedContinuation(editor.state) &&
-      !(editor.state.selection.empty && trailingNumberedLine(editor.state)),
+    checklist: inList("taskList") && !isTrailingListLine,
+    bulletList: inList("bulletList") && !isTrailingListLine,
+    numberList: inList("orderedList") && !emptyNumberedContinuation(editor.state) && !isTrailingListLine,
   };
   const signature = JSON.stringify(state);
   if (!force && signature === lastFormattingStateSignature) return;
@@ -2955,7 +3317,7 @@ function indentCurrentPlainCallout(direction) {
   const { $from, from, to } = state.selection;
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth);
-    if (node.type.name === "callout") return false;
+    if (node.type.name === "gridCard" || node.type.name === "iconCallout") return false;
     if (node.type.name !== "plainCallout") continue;
     const position = $from.before(depth);
     if (from < position || to > position + node.nodeSize) return false;
@@ -2970,9 +3332,21 @@ function indentCurrentPlainCallout(direction) {
 function currentTextblockRange() {
   const { $from } = editor.state.selection;
   for (let depth = $from.depth; depth > 0; depth -= 1) {
-    if ($from.node(depth).isTextblock) {
-      return { from: $from.start(depth), to: $from.end(depth) };
+    const block = $from.node(depth);
+    if (!block.isTextblock) continue;
+    const start = $from.start(depth);
+    let from = start, to = $from.end(depth);
+    // Existing plain callouts can contain hard breaks. Keep those logical
+    // lines independent for formatting without rewriting saved content.
+    if ($from.node(depth - 1).type.name === "plainCallout") {
+      block.forEach((child, offset) => {
+        if (child.type.name !== "hardBreak") return;
+        const boundary = start + offset;
+        if (boundary + child.nodeSize <= $from.pos) from = boundary + child.nodeSize;
+        else if (boundary >= $from.pos) to = Math.min(to, boundary);
+      });
     }
+    return { from, to };
   }
   return null;
 }
@@ -2994,7 +3368,7 @@ function rangeFullyHasMark(documentNode, from, to, markType) {
 function toggleMarkForCurrentSelection(markName) {
   const { state, view } = editor;
   if (!state.selection.empty) {
-    return editor.chain().focus().toggleMark(markName).run();
+    return editor.chain().toggleMark(markName).focus().run();
   }
 
   const range = currentTextblockRange();
@@ -3012,19 +3386,40 @@ function toggleMarkForCurrentSelection(markName) {
 }
 
 function movePageReferences(direction, documentID = null) {
+  return moveStructuralBlocks(direction, "pageReference", documentID);
+}
+
+function moveSelectedStructuralBlocks(direction) {
+  return ["pageReference", "divider", "plainCallout", "callout", "iconCallout"].some(type => moveStructuralBlocks(direction, type));
+}
+
+function moveBlockExactly(tr, position, node, insertAt) {
+  // Preflight both exact steps. The generic insert fitter may produce no step
+  // at a schema boundary; moving a block must never commit the delete alone.
+  const remove = new ReplaceStep(position, position + node.nodeSize, Slice.empty);
+  const without = remove.apply(tr.doc).doc;
+  if (!without) return null;
+  const destination = remove.getMap().map(insertAt, -1);
+  const insert = new ReplaceStep(destination, destination, new Slice(Fragment.from(node), 0, 0));
+  if (!insert.apply(without).doc) return null;
+  tr.step(remove).step(insert);
+  return destination;
+}
+
+function moveStructuralBlocks(direction, type, documentID = null) {
   if (editor.options.editable === false) return false;
   const state = editor.state;
   let targets = [];
   if (selectionMode !== "off" && !documentID) {
-    const selected = topLevelModelBlocks().filter(block => selection.has(block.key));
-    if (!selected.length || selected.some(block => block.type !== "pageReference")) return false;
+    const selected = window.PennedBlockSelection?.selectedRecords() ?? topLevelModelBlocks().filter(block => selection.has(block.key));
+    if (!selected.length || selected.some(block => block.type !== type)) return false;
     targets = selected;
-  } else if (state.selection.node?.type.name === "pageReference" &&
+  } else if (state.selection.node?.type.name === type &&
       (!documentID || state.selection.node.attrs.documentID === documentID)) {
     targets = [{ node: state.selection.node, pos: state.selection.from }];
   } else if (documentID) {
     state.doc.descendants((node, pos) => {
-      if (!targets.length && node.type.name === "pageReference" && node.attrs.documentID === documentID) targets.push({ node, pos });
+      if (!targets.length && node.type.name === type && node.attrs.documentID === documentID) targets.push({ node, pos });
     });
   }
   if (!targets.length) return false;
@@ -3032,24 +3427,23 @@ function movePageReferences(direction, documentID = null) {
   let selectedPosition = null;
   for (const target of targets.slice().sort((a, b) => direction > 0 ? a.pos - b.pos : b.pos - a.pos)) {
     const pos = tr.mapping.map(target.pos, 1), node = tr.doc.nodeAt(pos);
-    if (node?.type.name !== "pageReference" || node.attrs.id !== target.node.attrs.id) continue;
+    if (node?.type.name !== type || node.attrs.id !== target.node.attrs.id) continue;
     const resolved = tr.doc.resolve(pos), parent = resolved.parent, index = resolved.index();
     const previous = index > 0 ? parent.child(index - 1) : null;
     if (direction > 0 && previous?.type.name === "toggleItem" &&
         previous.canReplace(previous.childCount, previous.childCount, Fragment.from(node))) {
       const previousPosition = pos - previous.nodeSize;
       const destination = pos - 1;
-      if (previous.attrs.open === false) tr.setNodeMarkup(previousPosition, undefined, { ...previous.attrs, open: true });
-      tr.delete(pos, pos + node.nodeSize).insert(destination, node);
-      selectedPosition = destination;
+      const moved = moveBlockExactly(tr, pos, node, destination);
+      if (moved === null) continue;
+      if (previous.attrs.open === false) tr.setNodeAttribute(previousPosition, "open", true);
+      selectedPosition = moved;
     } else if (direction < 0 && parent.type.name === "toggleItem" && index > 0 && resolved.depth > 0) {
       const outer = resolved.node(resolved.depth - 1), outerIndex = resolved.index(resolved.depth - 1) + 1;
       if (!outer.canReplace(outerIndex, outerIndex, Fragment.from(node))) continue;
-      const end = resolved.after();
-      tr.delete(pos, pos + node.nodeSize);
-      const destination = tr.mapping.maps[tr.mapping.maps.length - 1].map(end, -1);
-      tr.insert(destination, node);
-      selectedPosition = destination;
+      const moved = moveBlockExactly(tr, pos, node, resolved.after());
+      if (moved === null) continue;
+      selectedPosition = moved;
     } else {
       const indent = Math.max(0, Math.min(6, Number(node.attrs.indent) || 0));
       const next = Math.max(0, Math.min(6, indent + direction));
@@ -3135,19 +3529,11 @@ function indentCurrentBlockIntoPreviousToggle() {
   const { state, view } = editor;
   const previousPosition = context.position - previousNode.nodeSize;
   const insertAt = previousPosition + previousNode.nodeSize - 1;
-  let transaction = state.tr;
-
-  if (previousNode.attrs.open === false) {
-    transaction = transaction.setNodeMarkup(previousPosition, undefined, {
-      ...previousNode.attrs,
-      open: true,
-    });
-  }
-
-  transaction = transaction
-    .delete(context.position, context.position + context.node.nodeSize)
-    .insert(insertAt, context.node);
-  restoreSelectionAfterBlockMove(transaction, context.position, insertAt);
+  const transaction = state.tr;
+  const destination = moveBlockExactly(transaction, context.position, context.node, insertAt);
+  if (destination === null) return false;
+  if (previousNode.attrs.open === false) transaction.setNodeAttribute(previousPosition, "open", true);
+  restoreSelectionAfterBlockMove(transaction, context.position, destination);
   view.dispatch(transaction.scrollIntoView());
   view.focus();
   return true;
@@ -3174,12 +3560,9 @@ function outdentCurrentBlockFromToggle() {
   const { state, view } = editor;
   const togglePosition = context.$from.before(context.parentDepth);
   const toggleEnd = togglePosition + context.parent.nodeSize;
-  let transaction = state.tr.delete(
-    context.position,
-    context.position + context.node.nodeSize,
-  );
-  const insertAt = transaction.mapping.map(toggleEnd, -1);
-  transaction = transaction.insert(insertAt, context.node);
+  const transaction = state.tr;
+  const insertAt = moveBlockExactly(transaction, context.position, context.node, toggleEnd);
+  if (insertAt === null) return false;
   restoreSelectionAfterBlockMove(transaction, context.position, insertAt);
   view.dispatch(transaction.scrollIntoView());
   view.focus();
@@ -3211,8 +3594,9 @@ function numberEmptyContinuation() {
 
 function formatCurrentSelection(action, value = null) {
   if (selectionMode !== "off" || !editor.isEditable) return false;
-  if (["indent", "outdent"].includes(action) && editor.state.selection.node?.type.name === "pageReference") {
-    return movePageReferences(action === "indent" ? 1 : -1);
+  const selectedType = editor.state.selection.node?.type.name;
+  if (["indent", "outdent"].includes(action) && ["pageReference", "divider"].includes(selectedType)) {
+    return moveStructuralBlocks(action === "indent" ? 1 : -1, selectedType);
   }
 
   switch (action) {
@@ -3264,9 +3648,9 @@ function formatCurrentSelection(action, value = null) {
   }
 }
 
-function deleteSelected(immediateSnapshot = false) {
+function deleteSelected(immediateSnapshot = false, removeListRows = false) {
   const before = editor.state.doc;
-  if (window.PennedBlockSelection?.deleteSelected()) {
+  if (window.PennedBlockSelection?.deleteSelected(removeListRows)) {
     postToSwift("snapshot", snapshotPayload());
     return editor.state.doc !== before;
   }
@@ -3389,6 +3773,8 @@ function insertNode(node) {
 }
 
 function blockNodeForKey(key) {
+  const label = /^labelHeading([1-4])$/.exec(key);
+  if (label) return { type: "heading", attrs: { id: id(), level: Number(label[1]), label: { ...labelSettings(), presentation: "label" } } };
   if (key.startsWith("property:")) {
     return { type: "inlineProperty", attrs: { id: id(), property: normalizeProperty({ kind: key.slice(9) }) } };
   }
@@ -3437,14 +3823,12 @@ function blockNodeForKey(key) {
         attrs: { id: id(), open: true },
         content: [{ type: "heading", attrs: { id: id(), level: 5 } }],
       };
-    case "callout":
-      return {
-        type: "callout",
-        attrs: { id: id(), icon: DEFAULT_CALLOUT_ICON, color: DEFAULT_CALLOUT_COLOR },
-        content: [paragraph()],
-      };
+    case "gridCard":
+      return newGridCard(id(), paragraph());
+    case "iconCallout":
+      return { type: "iconCallout", attrs: { id: id(), ...ICON_CALLOUT_DEFAULTS }, content: [paragraph()] };
     case "plainCallout":
-      return { type: "plainCallout", attrs: { id: id(), color: DEFAULT_CALLOUT_COLOR }, content: [paragraph()] };
+      return { type: "plainCallout", attrs: { id: id(), color: ICON_CALLOUT_DEFAULTS.backgroundColor }, content: [paragraph()] };
     case "quote":
       return { type: "blockquote", attrs: { id: id() }, content: [paragraph()] };
     case "checkListItem":
@@ -3491,6 +3875,39 @@ function blockNodeForKey(key) {
   }
 }
 
+function tabsCheckpoint(stage, details = {}) {
+  // Independent WebKit message, delivered before the insertion command returns.
+  // Keep payload small and avoid serializing the document.
+  postToSwift("tabsDiagnostic", { stage, ...details });
+}
+
+function insertContainerAtBlockBoundary(tr, node, range, depth) {
+  const $cursor = tr.selection.$from;
+  if (range && $cursor.depth === depth && $cursor.parent.isTextblock &&
+      range.from === $cursor.start() && range.to === $cursor.end()) {
+    const from = $cursor.before();
+    const $boundary = tr.doc.resolve(from);
+    if ($boundary.parent.canReplaceWith($boundary.index(), $boundary.index() + 1, node.type)) {
+      tr.replaceWith(from, $cursor.after(), node);
+      return from;
+    }
+  }
+  const boundary = $cursor.depth >= depth ? $cursor.after(depth) : $cursor.pos;
+  if (range) tr.delete(range.from, range.to);
+  const position = tr.mapping.map(boundary);
+  const $position = tr.doc.resolve(position);
+  if (!$position.parent.canReplaceWith($position.index(), $position.index(), node.type)) return null;
+  tr.insert(position, node);
+  return position;
+}
+
+function panelChildDepth($cursor) {
+  for (let depth = $cursor.depth - 1; depth > 0; depth--) {
+    if ($cursor.node(depth).type.name === "tabPanel") return depth + 1;
+  }
+  return 1;
+}
+
 function insertBlockByKey(key, range = null, color = null, insertionToken = null) {
   if (!editor.isEditable || selectionMode !== "off") return false;
   if (key === "templates") {
@@ -3501,6 +3918,7 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
     return true;
   }
   if (insertionToken && !restoreCaretInsertion(editor, insertionToken)) return false;
+  if (key === "divider:washiTape") return insertWashiTape(range);
   const column = key === "plainCallout" ? activeColumnInsertion(editor.state) : null;
   const location = editor.state.selection.$from;
   if (!column && location.parent.type.name === "paragraph" && location.depth > 1 &&
@@ -3525,31 +3943,148 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
     if (range) editor.chain().deleteRange(range).run();
     return window.VellixTables.command("requestInsert");
   }
+  if (key === "codeBlock") {
+    const block = blockNodeForKey(key);
+    const chain = editor.chain();
+    if (!(range ? chain.deleteRange(range) : chain).insertContent(block).run()) return false;
+    return codeBlocks.request(editor, block.attrs.id);
+  }
+  if (key === "gridCard" || key === "iconCallout" || (key === "plainCallout" && !column && !color && !insertionToken)) {
+    const block = blockNodeForKey(key);
+    let chain = editor.chain();
+    if (range) chain = chain.deleteRange(range);
+    const insideCard = Array.from({ length: location.depth }, (_, i) => i + 1)
+      .find(depth => ["gridCard", "iconCallout"].includes(location.node(depth).type.name) ||
+        (key === "plainCallout" && location.node(depth).type.name === "plainCallout"));
+    if (insideCard !== undefined) {
+      chain = chain.command(({ tr, commands }) => commands.insertContentAt(tr.mapping.map(location.after(insideCard)), block));
+    } else if (editor.state.selection instanceof NodeSelection) {
+      chain = chain.insertContentAt(editor.state.selection.to, block);
+    } else {
+      chain = chain.insertContent(block);
+    }
+    return chain.run() && requestGridCard(block.attrs.id, key);
+  }
   if (key === "listGridSettings") {
     return listGridModule.command(editor, "listGridRequestSelectedSettings");
   }
   if (key === "listGrid") {
     const json = listGridModule.listGridJSON();
-    const chain = editor.chain().focus();
-    (range ? chain.deleteRange(range) : chain).insertContent(json).run();
-    // Place the caret in the first label cell so the user can type immediately.
-    let caret = null;
-    editor.state.doc.descendants((node, pos) => {
-      if (caret !== null) return false;
-      if (node.type.name === "listGrid" && node.attrs.id === json.attrs.id) {
-        node.descendants((child, offset) => {
-          if (caret !== null) return false;
-          if (child.type.name === "paragraph") { caret = pos + 1 + offset + 1; return false; }
-          return undefined;
-        });
+    const opensSettings = !!window.PennedBlockSelection;
+    const chain = editor.chain();
+    // iOS presents settings without first focusing a cell. Mac has no List
+    // Grid sheet, so keep its existing caret placement for immediate editing.
+    if (!opensSettings) chain.focus();
+    if (!(range ? chain.deleteRange(range) : chain).insertContent(json).run()) return false;
+    if (!opensSettings) {
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== "listGrid" || node.attrs.id !== json.attrs.id) return;
+        // The first row is label + value, and the label contains one paragraph.
+        if (node.firstChild?.firstChild?.firstChild?.type.name === "paragraph") {
+          editor.commands.setTextSelection(pos + 4);
+        }
         return false;
-      }
-      return undefined;
-    });
-    if (caret !== null) editor.commands.setTextSelection(caret);
+      });
+    }
     renderCalloutIcons();
     requestAnimationFrame(reportContentHeight);
-    return true;
+    return !opensSettings || listGridModule.command(editor, "listGridRequestSettings", { blockId: json.attrs.id });
+  }
+  if (key === "tabs") {
+    // Build the complete parent + panels as a schema-validated ProseMirror node.
+    // Insert at a top-level boundary; inserting inside a paragraph or nested
+    // content can be rejected or split unexpectedly.
+    tabsCheckpoint("entered", { editable: editor.isEditable, selectionMode });
+    try {
+      const json = tabsModule.tabsJSON();
+      const tabsNode = editor.state.schema.nodeFromJSON(json);
+      tabsNode.check();
+      tabsCheckpoint("node-validated", { nodeSize: tabsNode.nodeSize });
+      const tr = editor.state.tr;
+      const position = insertContainerAtBlockBoundary(tr, tabsNode, range, 1);
+      if (position === null) {
+        postToSwift("error", { message: "Tabs insertion was rejected at the document position." });
+        return false;
+      }
+      tabsCheckpoint("after-tr-insert", { docSize: tr.doc.content.size });
+      tabsCheckpoint("before-dispatch");
+      editor.view.dispatch(tr);
+      tabsCheckpoint("after-dispatch");
+      // Confirm the block actually exists before reporting success.
+      const exists = editor.state.doc.nodeAt(position)?.type.name === "tabs";
+      if (!exists) {
+        postToSwift("error", { message: "Tabs insertion did not appear in the document." });
+        return false;
+      }
+      tabsCheckpoint("before-render-icons");
+      renderCalloutIcons();
+      tabsCheckpoint("after-render-icons");
+      requestAnimationFrame(reportContentHeight);
+      tabsCheckpoint("success");
+      return true;
+    } catch (error) {
+      tabsCheckpoint("exception", { error: String(error?.stack || error) });
+      postToSwift("error", { message: `Tabs insertion failed: ${error?.message || String(error)}` });
+      return false;
+    }
+  }
+  if (key === "informationCard") {
+    // Insert inside the active Tabs panel when the selection is within a panel.
+    // Otherwise retain normal document-level insertion.
+    try {
+      const json = informationCardJSON();
+      const node = editor.state.schema.nodeFromJSON(json);
+      node.check();
+      const tr = editor.state.tr;
+      const position = insertContainerAtBlockBoundary(tr, node, range, panelChildDepth(tr.selection.$from));
+      if (position === null) {
+        postToSwift("error", { message: "Information Card insertion was rejected at the document position." });
+        return false;
+      }
+      editor.view.dispatch(tr);
+      const inserted = editor.state.doc.nodeAt(position);
+      if (inserted?.type.name !== "informationCard") {
+        postToSwift("error", { message: "Information Card insertion did not appear in the document." });
+        return false;
+      }
+      // Inserting an Information Card block must not focus its title or open the keyboard.
+      editor.commands.blur();
+      renderCalloutIcons();
+      requestAnimationFrame(reportContentHeight);
+      return true;
+    } catch (error) {
+      postToSwift("error", { message: `Information Card insertion failed: ${error?.message || String(error)}` });
+      return false;
+    }
+  }
+  if (key === "fields") {
+    // Insert inside the active Tabs panel when the selection is within a panel.
+    // Otherwise retain normal document-level insertion.
+    try {
+      const json = minimalFieldsModule.minimalFieldsJSON();
+      const node = editor.state.schema.nodeFromJSON(json);
+      node.check();
+      const tr = editor.state.tr;
+      const position = insertContainerAtBlockBoundary(tr, node, range, panelChildDepth(tr.selection.$from));
+      if (position === null) {
+        postToSwift("error", { message: "Fields insertion was rejected at the document position." });
+        return false;
+      }
+      editor.view.dispatch(tr);
+      const inserted = editor.state.doc.nodeAt(position);
+      if (inserted?.type.name !== "minimalFields") {
+        postToSwift("error", { message: "Fields insertion did not appear in the document." });
+        return false;
+      }
+      // Inserting a Fields block must not focus its title or open the keyboard.
+      editor.commands.blur();
+      renderCalloutIcons();
+      requestAnimationFrame(reportContentHeight);
+      return true;
+    } catch (error) {
+      postToSwift("error", { message: `Fields insertion failed: ${error?.message || String(error)}` });
+      return false;
+    }
   }
   if (key === "nestedPage" || key === "pageCard") {
     if (!editor.isEditable || selectionMode !== "off") return false;
@@ -3585,6 +4120,23 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
       .setMeta("addToHistory", false));
   }
   const insertion = editor.chain();
+  if (node.type === "heading" && node.attrs.label?.presentation === "label") {
+    const inserted = insertion
+      .focus()
+      .command(({ tr, commands }) => {
+        // An empty heading is inserted at a block boundary, never as inline content.
+        const { $from } = tr.selection;
+        const replace = $from.depth > 0 && $from.parent.type.name === "paragraph" && !$from.parent.content.size;
+        const from = replace ? $from.before() : $from.depth > 0 ? $from.after() : $from.pos;
+        const to = replace ? $from.after() : from;
+        if (!commands.insertContentAt({ from, to }, node, { updateSelection: false })) return false;
+        if (tr.doc.nodeAt(from)?.attrs.id !== node.attrs.id) return false;
+        tr.setSelection(TextSelection.create(tr.doc, from + 1));
+        return true;
+      }).run();
+    if (inserted) requestAnimationFrame(reportContentHeight);
+    return inserted;
+  }
   if (node.type !== "inlineProperty") insertion.focus();
   const command = column && !column.node.content.size
     ? insertion.insertContentAt(column.position, node)
@@ -3593,6 +4145,7 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
     : selectedProperty ? insertion.insertContentAt(editor.state.selection.to, node)
     : insertion.insertContent(node);
   const inserted = command.run();
+  if (inserted && node.type === "plainCallout" && !color && !insertionToken) requestGridCard(node.attrs.id, "plainCallout");
   if (inserted && node.type === "inlineProperty") {
     editor.commands.blur();
     postToSwift("propertyEditorRequest", { blockId: node.attrs.id, property: node.attrs.property });
@@ -3651,15 +4204,77 @@ function insertPageBreak(range = null) {
   return inserted;
 }
 
+function findWashiTape(blockID) {
+  let result = null;
+  if (!blockID) return result;
+  editor.state.doc.descendants((node, pos) => {
+    if (!result && node.type.name === "divider" && node.attrs.style === "washiTape" && node.attrs.id === blockID) {
+      result = { node, pos };
+      return false;
+    }
+  });
+  return result;
+}
+
+function requestWashiTape(blockID) {
+  if (!editor.isEditable || selectionMode !== "off" || editor.view.composing) return false;
+  const target = findWashiTape(blockID);
+  if (!target) return false;
+  const { node } = target;
+  editor.commands.blur();
+  postToSwift("washiTapeSettings", { blockID, imagePath: node.attrs.imagePath, remotePhoto: dividerPhoto(node.attrs.remotePhoto),
+    color: dividerColor(node.attrs.color), tapeSize: washiTapeSize(node.attrs.tapeSize) });
+  return true;
+}
+
+function insertWashiTape(range = null) {
+  if (!editor.isEditable || selectionMode !== "off" || editor.view.composing) return false;
+  const blockID = id();
+  if (typeof editor.storage.pennedMobileInsertDivider === "function") {
+    if (!editor.storage.pennedMobileInsertDivider("washiTape", range, blockID)) return false;
+  } else {
+    const chain = editor.chain();
+    if (range) chain.deleteRange(range);
+    if (!chain.insertContent({ type: "divider", attrs: { id: blockID, style: "washiTape" } }).run()) return false;
+  }
+  return requestWashiTape(blockID);
+}
+
+function updateWashiTape(args) {
+  if (!editor.isEditable || selectionMode !== "off") return false;
+  const target = findWashiTape(args.blockID);
+  if (!target || (target.node.attrs.imagePath || null) !== (args.originalPath || null) ||
+      (target.node.attrs.remotePhoto?.id || null) !== (args.originalPhotoID || null)) return false;
+  const currentSize = washiTapeSize(target.node.attrs.tapeSize);
+  const tapeSize = washiTapeSize(args.tapeSize ?? currentSize);
+  if (args.originalTapeSize != null && currentSize !== washiTapeSize(args.originalTapeSize) && currentSize !== tapeSize) return false;
+  const remotePhoto = dividerPhoto(args.remotePhoto);
+  const imagePath = !remotePhoto && typeof args.imagePath === "string" && attachmentURL({ relativePath: args.imagePath })
+    ? args.imagePath : null;
+  if ((args.remotePhoto && !remotePhoto) || (args.imagePath && !imagePath)) return false;
+  const tr = closeHistory(editor.state.tr);
+  tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, imagePath, remotePhoto, tapeSize });
+  if (!tr.doc.eq(editor.state.doc)) {
+    editor.view.dispatch(tr);
+    editor.view.dispatch(closeHistory(editor.state.tr));
+  }
+  return snapshotPayload();
+}
+
 let slashState = null;
 let slashMenuVisible = false;
+let dismissedSlash = null;
+const maxSlashQueryLength = Math.max(...SLASH_ITEMS.map(item => `${item.title} ${item.detail} ${item.key}`.length));
 
 function slashRangeAtSelection() {
-  const { $from } = editor.state.selection;
-  const before = $from.parent.textBetween(0, $from.parentOffset, "\n", "\0");
+  const { $from, empty } = editor.state.selection;
+  if (!empty || !$from.parent.isTextblock || $from.parent.type.spec.code) return null;
+  const start = Math.max(0, $from.parentOffset - maxSlashQueryLength - 2);
+  const before = $from.parent.textBetween(start, $from.parentOffset, "\n", "\0");
   const match = before.match(/(?:^|\s)\/([a-zA-Z0-9]*)$/);
   if (!match) return null;
   const query = match[1] || "";
+  if (query.length > maxSlashQueryLength) return null;
   return {
     from: $from.pos - query.length - 1,
     to: $from.pos,
@@ -3680,6 +4295,12 @@ function hideSlashMenu() {
   slashState = null;
   slashMenuVisible = false;
   if (wasVisible) postToSwift("slashMenu", { visible: false });
+}
+
+function dismissSlashMenu() {
+  if (slashMenuVisible && slashState) dismissedSlash = slashState.range.from;
+  hideSlashMenu();
+  return true;
 }
 
 function renderSlashMenu() {
@@ -3718,6 +4339,7 @@ function renderSlashMenu() {
     selectedIndex: slashState.index,
     anchorX: left,
     anchorY: top,
+    anchorAboveY: coords.top - topGutter,
     width: menuWidth,
     maxHeight: menuMaxHeight,
     items: items.map((item) => ({
@@ -3727,16 +4349,15 @@ function renderSlashMenu() {
       icon: item.icon,
     })),
   });
-  requestAnimationFrame(reportContentHeight);
 }
 
 function updateSlashMenu() {
-  if (selectionMode !== "off") {
+  if (selectionMode !== "off" || !editor.isEditable || editor.view.composing) {
     hideSlashMenu();
     return;
   }
   const range = slashRangeAtSelection();
-  if (!range) {
+  if (!range || range.from === dismissedSlash) {
     hideSlashMenu();
     return;
   }
@@ -3765,6 +4386,12 @@ function topLevelInsertionPositionAtY(clientY) {
 
 function placeCaretInParagraphAt(position) {
   return placeCaretInSlot(editor, position);
+}
+
+function placeCaretAtPageBoundary(position) {
+  // On iOS the native document scroll view already reveals real text carets.
+  // A second reveal from ProseMirror can scroll against the changing page layout.
+  return placeCaretInSlot(editor, position, { scroll: !window.PennedBlockSelection });
 }
 
 function focusEditorAtDocumentEnd() {
@@ -3798,12 +4425,50 @@ function insertParagraphFromEmptySurface(event) {
   if (!(target instanceof HTMLElement)) return false;
 
   const content = editor.view.dom;
+  // Tabs chrome handles navigation and settings, not caret placement.
+  if (target.matches(".penned-tabs[data-tabs]") ||
+      target.closest(".penned-tabs-header, .penned-tabs-bar")) return false;
   if (target.closest("button, a, input, textarea, select, audio, video, iframe, [role='button']")) return false;
+  const pageBoundary = pageBreakGapAtPoint(editor, target, event.clientX, event.clientY);
+  if (pageBoundary !== null) {
+    event.preventDefault();
+    placeCaretAtPageBoundary(pageBoundary);
+    return true;
+  }
   if (placeCaretOnTrailingNumberedLine(editor, target, event.clientX, event.clientY)) {
     event.preventDefault();
     return true;
   }
   const gapPosition = blockGapAtPoint(editor, target, event.clientX, event.clientY);
+  // WebKit can resolve a tap in the blank space after a decorated heading
+  // back into its editable label. Only recover taps physically BELOW the
+  // heading, never taps on its tile or text, and use the existing caret slot.
+  if (editor.view.dom.contains(target)) {
+    let labelEnd = null;
+    editor.state.doc.descendants((node, offset, parent) => {
+      if (node.type.name !== "heading" || node.attrs.label?.presentation !== "label" ||
+          !["informationCardBody", "doc"].includes(parent?.type.name)) return;
+      const element = editor.view.nodeDOM(offset);
+      if (!(element instanceof HTMLElement)) return;
+      const bounds = element.getBoundingClientRect();
+      const next = element.nextElementSibling?.getBoundingClientRect();
+      const body = element.closest("[data-information-card-body]");
+      const horizontal = (body || editor.view.dom).getBoundingClientRect();
+      if (event.clientY <= bounds.bottom || (next && event.clientY >= next.top) ||
+          event.clientY > (body || editor.view.dom).getBoundingClientRect().bottom ||
+          event.clientX < horizontal.left || event.clientX > horizontal.right ||
+          (body && !body.contains(target) && target !== body)) return;
+      const position = offset + node.nodeSize;
+      const boundary = editor.state.doc.resolve(position);
+      if (!boundary.parent.canReplaceWith(boundary.index(), boundary.index(), editor.schema.nodes.paragraph)) return;
+      if (labelEnd === null || event.clientY - bounds.bottom < labelEnd.distance)
+        labelEnd = { position, distance: event.clientY - bounds.bottom };
+    });
+    if (labelEnd && placeCaretInParagraphAt(labelEnd.position)) {
+      event.preventDefault();
+      return true;
+    }
+  }
   const isEmptyEditorSurface =
     target === content ||
     target.id === "editor" ||
@@ -3819,9 +4484,15 @@ function insertParagraphFromEmptySurface(event) {
 }
 
 function chooseSlashItem(key) {
-  if (!slashState) return false;
-  const range = slashState.range;
+  if (!slashState || !slashMenuVisible || !editor.isEditable || selectionMode !== "off" || editor.view.composing) return false;
+  const range = slashRangeAtSelection();
+  if (!range || range.from !== slashState.range.from || range.query !== slashState.query ||
+      !filteredSlashItems(range.query).some(item => item.key === key)) return false;
   hideSlashMenu();
+  if (key === "divider:washiTape") return insertWashiTape(range);
+  if (key.startsWith("divider:") && typeof editor.storage.pennedMobileInsertDivider === "function") {
+    return editor.storage.pennedMobileInsertDivider(key.slice("divider:".length), range);
+  }
   if (key === "inlineCode") {
     return editor.chain().focus().deleteRange(range).toggleMark("code").run();
   }
@@ -3831,12 +4502,35 @@ function chooseSlashItem(key) {
   return insertBlockByKey(key, range);
 }
 
-editor.on("selectionUpdate", updateSlashMenu);
-editor.on("update", updateSlashMenu);
+editor.on("transaction", ({ transaction, appendedTransactions = [] }) => {
+  let changed = false;
+  for (const tr of [transaction, ...appendedTransactions]) {
+    changed ||= tr.docChanged || tr.selectionSet;
+    if (dismissedSlash === null || !tr.docChanged) continue;
+    // Follow the original character, not its position or the current caret.
+    const from = tr.mapping.mapResult(dismissedSlash, 1);
+    const to = tr.mapping.mapResult(dismissedSlash + 1, -1);
+    if (from.deleted || to.deleted || to.pos !== from.pos + 1 || tr.doc.textBetween(from.pos, to.pos) !== "/") {
+      dismissedSlash = null;
+      continue;
+    }
+    dismissedSlash = from.pos;
+  }
+  if (changed) updateSlashMenu();
+});
+editor.view.dom.addEventListener("compositionend", () => requestAnimationFrame(updateSlashMenu));
 // Transactions also cover stored marks, undo/redo, and programmatic selection changes.
-editor.on("transaction", () => reportFormattingState());
-editor.on("focus", () => reportFormattingState());
-editor.on("blur", () => reportFormattingState());
+let formattingFrame = null;
+function queueFormattingState() {
+  if (formattingFrame !== null) return;
+  formattingFrame = requestAnimationFrame(() => {
+    formattingFrame = null;
+    if (!editor.isDestroyed) reportFormattingState();
+  });
+}
+editor.on("transaction", queueFormattingState);
+editor.on("focus", queueFormattingState);
+editor.on("blur", queueFormattingState);
 
 const blockActions = createBlockActions({ editor, blocks: topLevelModelBlocks, elementForBlock: elementForModelBlock,
   selectionActive: () => selectionMode !== "off", post: postToSwift, snapshot: snapshotPayload });
@@ -3856,36 +4550,134 @@ window.visualViewport?.addEventListener("scroll", () => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (!slashState || !slashMenuVisible) return;
+  if (!slashState || !slashMenuVisible || event.isComposing) return;
+  if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(event.key)) return;
   const items = filteredSlashItems(slashState.query);
   if (!items.length) return;
+  event.preventDefault();
+  event.stopPropagation();
 
   if (event.key === "ArrowDown") {
-    event.preventDefault();
     slashState.index = (slashState.index + 1) % items.length;
     renderSlashMenu();
   } else if (event.key === "ArrowUp") {
-    event.preventDefault();
     slashState.index = (slashState.index - 1 + items.length) % items.length;
     renderSlashMenu();
   } else if (event.key === "Enter" || event.key === "Tab") {
-    event.preventDefault();
     chooseSlashItem(items[slashState.index]?.key);
   } else if (event.key === "Escape") {
+    dismissSlashMenu();
+  }
+}, true);
+
+// Paint callout text ranges independently of WebKit's transient selection paint.
+// Custom Highlights do not wrap text or move the native selection handles.
+if (typeof Highlight === "function" && window.CSS?.highlights && CSS.supports("selector(::highlight(penned-callout-selection))")) {
+  window.PennedCalloutRangeHighlight = true;
+  const name = "penned-callout-selection";
+  let frame = null;
+  const selectionDocument = editor.view.dom.ownerDocument;
+  const update = () => {
+    frame = null;
+    const { view } = editor;
+    if (!editor.isEditable || selectionMode !== "off") {
+      CSS.highlights.delete(name);
+      return;
+    }
+    const native = selectionDocument.getSelection();
+    let range = null;
+    if (native?.rangeCount && !native.isCollapsed) {
+      const selected = native.getRangeAt(0);
+      if (view.dom.contains(selected.startContainer) && view.dom.contains(selected.endContainer)) range = selected.cloneRange();
+    } else if (view.hasFocus()) {
+      const selection = view.state.selection;
+      if (selection instanceof TextSelection && !selection.empty) {
+        const start = view.domAtPos(selection.from, 1), end = view.domAtPos(selection.to, -1);
+        range = selectionDocument.createRange();
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+      }
+    }
+    if (range && !range.collapsed) CSS.highlights.set(name, new Highlight(range));
+    else CSS.highlights.delete(name);
+  };
+  const schedule = () => {
+    if (frame === null && (CSS.highlights.has(name) || !editor.state.selection.empty ||
+        selectionDocument.getSelection()?.isCollapsed === false)) frame = requestAnimationFrame(update);
+  };
+  selectionDocument.addEventListener("selectionchange", schedule);
+  editor.on("selectionUpdate", schedule);
+  editor.on("blur", schedule);
+  editor.on("destroy", () => {
+    selectionDocument.removeEventListener("selectionchange", schedule);
+    if (frame !== null) cancelAnimationFrame(frame);
+    CSS.highlights.delete(name);
+    delete window.PennedCalloutRangeHighlight;
+  });
+}
+
+document.addEventListener("pointerdown", event => documentLinks.pointerDown(editor, event), { capture: true });
+document.addEventListener("mousedown", (event) => {
+  if (selectionMode === "off" && event.target.closest?.(".vellix-callout-icon-button")) {
     event.preventDefault();
-    hideSlashMenu();
   }
 });
 
-document.addEventListener("mousedown", (event) => {
-  if (selectionMode === "off" && event.target.closest?.(".vellix-callout-icon-button, .vellix-plain-callout-color-button")) {
+// Don't let the browser park an editable-looking caret on the atomic page
+// break. Handle only stationary taps in this specific boundary area.
+const pageGapInteractionAllowed = () => selectionMode === "off" && editor.isEditable && !editor.view.composing;
+let pageGapTouch = null;
+for (const type of ["pointerdown", "mousedown"]) {
+  document.addEventListener(type, event => {
+    if (event.button === 0 && pageGapInteractionAllowed() &&
+        pageBreakGapAtPoint(editor, event.target, event.clientX, event.clientY) !== null) event.preventDefault();
+  }, true);
+}
+editor.view.dom.addEventListener("touchstart", event => {
+  const point = event.touches[0];
+  pageGapTouch = event.touches.length === 1 && pageGapInteractionAllowed() &&
+    pageBreakGapAtPoint(editor, event.target, point.clientX, point.clientY) !== null
+    ? { id: point.identifier, x: point.clientX, y: point.clientY } : null;
+}, { passive: true });
+editor.view.dom.addEventListener("touchmove", event => {
+  const point = event.touches[0];
+  if (pageGapTouch && (event.touches.length !== 1 || Math.hypot(point.clientX - pageGapTouch.x, point.clientY - pageGapTouch.y) > 8)) pageGapTouch = null;
+}, { passive: true });
+editor.view.dom.addEventListener("touchcancel", () => { pageGapTouch = null; }, { passive: true });
+editor.view.dom.addEventListener("touchend", event => {
+  const start = pageGapTouch;
+  pageGapTouch = null;
+  if (!start || !event.cancelable || !pageGapInteractionAllowed()) return;
+  const point = [...event.changedTouches].find(touch => touch.identifier === start.id);
+  if (!point || Math.hypot(point.clientX - start.x, point.clientY - start.y) > 8) return;
+  const position = pageBreakGapAtPoint(editor, event.target, point.clientX, point.clientY);
+  if (position !== null) {
     event.preventDefault();
+    event.stopImmediatePropagation();
+    placeCaretAtPageBoundary(position);
   }
-});
+}, { passive: false });
 
 // Card node views own their normal clicks. Handle only their surrounding gaps
 // before those views stop propagation, leaving taps on the cards themselves alone.
 document.addEventListener("click", event => {
+  const tape = event.target.closest?.('[data-divider-style="washiTape"]');
+  if (tape && editor.view.dom.contains(tape) && !event.defaultPrevented && event.button === 0 &&
+      !window.PennedBlockSelection?.consumesClick(event) && selectionMode === "off") {
+    const credit = event.target.closest?.(".vellix-divider-credit a");
+    if (credit) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      postToSwift("propertyURLRequest", { url: credit.href });
+      return;
+    }
+    const node = editor.state.doc.nodeAt(editor.view.posAtDOM(tape, 0));
+    if (requestWashiTape(node?.attrs.id)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+  }
   if (insertParagraphFromEmptySurface(event)) event.stopImmediatePropagation();
 }, true);
 
@@ -3907,19 +4699,7 @@ document.addEventListener("click", (event) => {
     if (selectionMode === "off") postToSwift("propertyURLRequest", { url: sourceLink.href });
     return;
   }
-
-  const colorButton = event.target.closest?.(".vellix-plain-callout-color-button");
-  if (colorButton) {
-    event.preventDefault();
-    event.stopPropagation();
-    if (selectionMode !== "off" || !editor.isEditable) return;
-    const callout = colorButton.closest(".vellix-plain-callout");
-    postToSwift("calloutColorPickerRequest", {
-      blockId: callout?.dataset.vellixBlockId || "",
-      currentColor: callout?.dataset.calloutColor || DEFAULT_CALLOUT_COLOR,
-    });
-    return;
-  }
+  if (documentLinks.handleClick(editor, event)) return;
 
   const iconButton = event.target.closest?.(".vellix-callout-icon-button");
   if (iconButton) {
@@ -3927,11 +4707,7 @@ document.addEventListener("click", (event) => {
     const blockId = callout?.dataset.vellixBlockId || "";
     event.preventDefault();
     event.stopPropagation();
-    postToSwift("iconPickerRequest", {
-      blockId,
-      currentIcon: callout?.dataset.calloutIcon || DEFAULT_CALLOUT_ICON,
-      currentColor: callout?.dataset.calloutColor || DEFAULT_CALLOUT_COLOR,
-    });
+    requestGridCard(blockId, callout?.dataset.type === "penned-icon-callout" ? "iconCallout" : "gridCard");
     return;
   }
 
@@ -3948,7 +4724,53 @@ const resizeObserver = new ResizeObserver(() => {
 });
 resizeObserver.observe(document.documentElement);
 
+// The settings sheet loads this same local editor page in a read-only web view.
+window.pennedGridCardPreview = async ({ node, settings, appearance, assets, width }) => {
+  document.documentElement.dataset.gridCardPreview = "";
+  editor.view.dom.style.width = `${width}px`;
+  const draft = gridCardSettings(settings);
+  if (node) {
+    applyAppearance(appearance);
+    editor.setEditable(false, false);
+    editor.commands.setContent({ type: "doc", content: [{ ...node, attrs: { ...node.attrs, ...draft } }] }, { emitUpdate: false });
+  } else {
+    const current = editor.state.doc.firstChild;
+    if (current?.type.name === "gridCard" && JSON.stringify(gridCardSettings(current.attrs)) !== JSON.stringify(draft)) {
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(0, undefined, { ...current.attrs, ...draft })
+        .setMeta("addToHistory", false).setMeta("preventUpdate", true));
+    }
+  }
+  if (Object.keys(assets).length) await window.tiptapCommand("registerIconAssets", { assets });
+  await document.fonts?.ready;
+  return Math.ceil(editor.view.dom.firstElementChild?.getBoundingClientRect().height ?? 100);
+};
+
+window.pennedRepaintScallopedLabels = repaintScallopedLabels;
+
 window.tiptapCommand = async function tiptapCommand(name, args = {}) {
+  if (name === "requestBlockSettings") return requestBlockSettings();
+  if (name === "requestSelectedBlockSettings") return requestSelectedBlockSettings(args);
+  if (name === "washiTapeUpdate") return updateWashiTape(args);
+  if (name === "headingLabelUpdate") {
+    if (!editor.isEditable || selectionMode !== "off") return false;
+    if (!updateHeadingLabel(editor, args, closeHistory)) return false;
+    if (args.assets) await window.tiptapCommand("registerIconAssets", { assets: args.assets });
+    return snapshotPayload();
+  }
+  if (name === "setEditable") linkEditingEnabled = args.editable === true;
+  const linkResult = documentLinks.command(editor, name, args);
+  if (linkResult !== undefined) {
+    if (linkResult === true && (name === "linksApply" || name === "linksSelected")) {
+      postToSwift("snapshot", snapshotPayload());
+      reportFormattingState();
+    }
+    return linkResult;
+  }
+  if (["gridCardUpdate", "iconCalloutUpdate", "plainCalloutUpdate"].includes(name)) {
+    const result = commitGridCard(args, name.slice(0, -"Update".length));
+    if (result && args.assets) await window.tiptapCommand("registerIconAssets", { assets: args.assets });
+    return result;
+  }
   if (name === "templateInsertionAvailable") return editor.isEditable && selectionMode === "off" && hasCaretInsertion(editor, args.token);
   if (name === "templateEndInsertion") return endCaretInsertion(editor, args.token);
   if (name === "insertTemplate") {
@@ -3970,6 +4792,14 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
   if (colorResult !== undefined) return colorResult;
   const listGridResult = listGridModule.command(editor, name, args);
   if (listGridResult !== undefined) return listGridResult;
+  const codeBlockResult = codeBlocks.command(editor, name, args);
+  if (codeBlockResult !== undefined) return codeBlockResult;
+  const tabsResult = tabsModule.command(editor, name, args);
+  if (tabsResult !== undefined) return tabsResult;
+  const informationCardResult = informationCardModule.command(editor, name, args);
+  if (informationCardResult !== undefined) return informationCardResult;
+  const minimalFieldsResult = minimalFieldsModule.command(editor, name, args);
+  if (minimalFieldsResult !== undefined) return minimalFieldsResult;
   const pennedSelectionResult = window.PennedBlockSelection?.command(name, args);
   if (pennedSelectionResult !== undefined) return pennedSelectionResult;
   const tagResult = await documentTags.command(editor, name, args);
@@ -4014,7 +4844,13 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       setPageReferences(args.pages || []);
       setCollections(args.collections || []);
       attachments.command(editor, "setAttachments", { files: args.files || [] });
-      const result = await prepareDocumentPresentation(editor.view.dom, document);
+      const generation = args.openingDiagnosticGeneration;
+      const started = Number.isSafeInteger(generation) ? performance.now() : null;
+      const diagnostic = started === null ? undefined : (phase, data) => {
+        postToSwift("openingDiagnostic", { generation, phase, browserMS: Math.round(performance.now() - started), ...data });
+      };
+      const result = await prepareDocumentPresentation(editor.view.dom, document, diagnostic);
+      if (diagnostic) result.openingDiagnostic = true;
       reportContentHeight();
       return result;
     }
@@ -4061,8 +4897,15 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       return true;
     }
     case "setContent":
+      tabsModule.command(editor, "tabsResetNavigation");
+      cancelScheduledUpdate();
+      supportsTextCheckpoints = args.textCheckpoints === true;
+      dismissedSlash = null;
+      hideSlashMenu();
       pendingSubpage = null;
       resetCaretInsertions(editor);
+      lastHeight = lastVisualContentBottom = -1;
+      lastPageBreakSignature = "";
       lastNativeCollectionSignature = "";
       {
         const normalizedDocument = normalizeLoadedTipTapDocument(args.document ?? args);
@@ -4078,9 +4921,16 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 		      renderCalloutIcons();
 		      reportFormattingState(true);
 	      requestAnimationFrame(reportContentHeight);
+      if (Number.isSafeInteger(args.openingLoadDiagnosticGeneration)) {
+        postToSwift("openingDiagnostic", {
+          generation: args.openingLoadDiagnosticGeneration,
+          phase: "tiptap-set-content-returned",
+        });
+      }
 	      return true;
     case "setEditable":
       editor.setEditable(args.editable === true, false);
+      if (!editor.isEditable) hideSlashMenu();
       templateComponents.refresh();
       reportFormattingState();
       return true;
@@ -4137,19 +4987,14 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       return true;
     case "chooseSlashItem":
       return chooseSlashItem(args.key || "");
+    case "dismissSlashMenu":
+      return dismissSlashMenu();
     case "insertDivider":
+      if (args.style === "washiTape") return insertWashiTape();
       insertNode({ type: "divider", attrs: { id: id(), style: normalizedDividerStyle(args.style) } });
       return true;
     case "insertPageBreak":
       return insertBlockByKey("pageBreak");
-	    case "insertCallout":
-	      return focusedChain()
-	        .insertVellixCallout({
-	          icon: args.icon || DEFAULT_CALLOUT_ICON,
-	          color: args.color || DEFAULT_CALLOUT_COLOR,
-	          text: args.text || "",
-	        })
-	        .run();
       case "plainCalloutCaptureInsertion":
         return editor.isEditable && selectionMode === "off" ? beginCaretInsertion(editor) : false;
       case "plainCalloutEndInsertion":
@@ -4160,29 +5005,26 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 	      if (typeof args.blockType === "string" && args.blockType.startsWith("divider:")) {
 	        return convertSelectedDividers(args.blockType.slice("divider:".length));
 	      }
-	      transformSelectedBlocks(args.blockType, args);
-	      return true;
+	      return transformSelectedBlocks(args.blockType, args);
 	    case "setSelectedCalloutColor":
 	      updateSelectedCalloutColor(args.color || DEFAULT_CALLOUT_COLOR);
 	      return true;
 	    case "formatSelectedBlocks":
-	      formatSelectedBlocks(args.action, args.value);
-	      return true;
+	      return formatSelectedBlocks(args.action, args.value);
       case "formatCurrentSelection":
         return formatCurrentSelection(args.action, args.value);
       case "toggleTextMark":
         return editor.chain().focus().toggleMark(args.mark === "codeUnderline" ? "code" : (args.mark || "code")).run();
-	    case "updateCalloutIcon":
-	      updateCalloutIcon(args.blockId, args.icon);
-	      return true;
 	    case "updateCalloutColor":
 	      updateCalloutColor(args.blockId, args.color);
 	      return true;
     case "indentSelectedBlocks":
-      if (movePageReferences(1)) return true;
+      if (moveSelectedStructuralBlocks(1)) return true;
+      if (selectionMode !== "off" && selection.size) return false;
       return focusedChain().sinkListItem("listItem").run() || focusedChain().sinkListItem("taskItem").run();
     case "outdentSelectedBlocks":
-      if (movePageReferences(-1)) return true;
+      if (moveSelectedStructuralBlocks(-1)) return true;
+      if (selectionMode !== "off" && selection.size) return false;
       return focusedChain().liftListItem("listItem").run() || focusedChain().liftListItem("taskItem").run();
     case "indentPageReference":
       return movePageReferences(args.outdent ? -1 : 1, args.documentID);
@@ -4198,8 +5040,11 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
 	    case "clearBlockSelection":
 	      setSelectionMode("off");
 	      return true;
+        case "clearBlockSelectionIfEmpty":
+          if (!selection.size && selectionMode !== "off") setSelectionMode("off");
+          return true;
     case "deleteSelectedBlocks":
-      deleteSelected();
+      deleteSelected(false, true);
       return true;
     case "copySelectedBlocks":
       return await copySelected();

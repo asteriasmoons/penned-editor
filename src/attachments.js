@@ -7,7 +7,9 @@ import { videoPlayer } from "./video-player.js";
 import { attachmentActions } from "./attachment-actions.js";
 
 const modes = { image: ["inline", "fullWidth", "card"], pdf: ["preview", "card"], video: ["player", "card"], audio: ["player", "card"], file: ["card"] };
-export function containsAttachments(nodes) { return nodes.some(node => node.type === "attachment" || node.attrs?.clipSource?.file?.relativePath || containsAttachments(node.content || [])); }
+export function containsAttachments(nodes) { return nodes.some(node => node.type === "attachment" ||
+  ["divider", "iconCallout"].includes(node.type) && node.attrs?.imagePath ||
+  node.attrs?.clipSource?.file?.relativePath || containsAttachments(node.content || [])); }
 export function attachmentLayout(file, attrs = {}) {
   const kind = Object.hasOwn(modes, file?.kind) ? file.kind : "file";
   return { mode: modes[kind].includes(attrs.displayMode) ? attrs.displayMode : modes[kind][0],
@@ -26,6 +28,13 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
   const actionHosts = new Map();
   const key = new PluginKey("pennedAttachments");
   const isAttachment = node => node.type.name === "attachment";
+  function requestSettings(node, actions = false) {
+    const path = node.attrs.file?.relativePath;
+    if (selectionActive() || !node.attrs.id || !path) return false;
+    post(actions ? "attachmentActions" : "attachmentMenu", { blockID: node.attrs.id, relativePath: path,
+      ...attachmentLayout(files.get(path), node.attrs) });
+    return true;
+  }
   const capture = editor => {
     bookmark = editor.state.selection.getBookmark(); insertionToken = crypto.randomUUID(); return insertionToken;
   };
@@ -105,8 +114,7 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
       const configure = (event, actions = event?.type === "contextmenu") => {
         if (selectionActive()) return;
         event?.preventDefault();
-        post(actions ? "attachmentActions" : "attachmentMenu", { blockID: current.attrs.id, relativePath: current.attrs.file?.relativePath,
-          ...attachmentLayout(files.get(current.attrs.file?.relativePath), current.attrs) });
+        requestSettings(current, actions);
       };
       actionHosts.set(dom, () => configure(null, true));
       dom.addEventListener("click", event => { if (!event.target.closest("video,audio,.penned-audio-pill,.penned-video-frame")) configure(event); });
@@ -176,7 +184,19 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
       clipboardRequests.forEach(resolve => resolve(false)); clipboardRequests.clear();
     }
     if (name === "setAttachments") {
+      const previous = files;
       files = new Map((args.files || []).filter(file => attachmentURL(file)).map(file => [file.relativePath, file]));
+      if ([...files.keys()].some(path => !previous.has(path))) {
+        for (const callout of editor.view.dom.querySelectorAll(".penned-icon-callout[data-callout-image]")) {
+          const path = callout.dataset.calloutImage;
+          const image = callout.querySelector(".penned-icon-callout-image");
+          if (!previous.has(path) && files.has(path) && image?.complete && !image.naturalWidth) {
+            const src = attachmentURL({ relativePath: path }) + "&retry=1";
+            image.src = src;
+            image.closest(".penned-icon-callout-tint")?.style.setProperty("--penned-callout-mask", `url(${JSON.stringify(src)})`);
+          }
+        }
+      }
       views.forEach(render => render()); return true;
     }
     if (!name.startsWith("attachment")) return undefined;
@@ -220,7 +240,8 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
     editor.view.dispatch(closeHistory(editor.state.tr)); post("snapshot", snapshot()); return true;
   }
   async function copyBlocks(editor, blocks, text) {
-    if (!containsAttachments(blocks)) return undefined;
+    // Block-selection copy always carries rich structure, not only attachments.
+    // Ordinary text-range selection continues through ProseMirror's native copy.
     const wrapper = document.createElement("div");
     const fragment = Fragment.fromArray(blocks.map(node => editor.schema.nodeFromJSON(node)));
     wrapper.appendChild(DOMSerializer.fromSchema(editor.schema).serializeFragment(fragment));
@@ -231,5 +252,5 @@ export function createAttachments({ Node, Extension, post, snapshot, selectionAc
       post("attachmentClipboard", { token, html: wrapper.innerHTML, text });
     });
   }
-  return { node, integration, command, copyBlocks };
+  return { node, integration, command, copyBlocks, requestSettings };
 }

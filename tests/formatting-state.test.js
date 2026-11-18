@@ -129,6 +129,21 @@ test("unchanged formatting is deduplicated but each loaded document reports its 
   } finally { h.close(); }
 });
 
+test("desktop block selection formats uniformly without enabling text editing", async () => {
+  const h = await runtime([paragraph("Bold", ["bold"]), paragraph("Plain")]);
+  try {
+    for (const paragraph of h.editor.view.dom.querySelectorAll("p")) {
+      paragraph.getClientRects = () => [{ width: 100, height: 20 }];
+    }
+    await h.command("selectAllBlocks");
+    assert.equal(h.editor.isEditable, false);
+    assert.equal(await h.command("formatSelectedBlocks", { action: "bold" }), true);
+    assert.equal(JSON.stringify(h.editor.getJSON().content.map(node => node.content[0].marks?.map(mark => mark.type))),
+      '[["bold"],["bold"]]');
+    assert.equal(h.state().selectedBlocksStyle.marks.includes("bold"), true);
+  } finally { h.close(); }
+});
+
 test("template callout guidance uses its projected marks for active formatting", async () => {
   const guided = paragraph();
   guided.attrs.placeholderEnabled = true;

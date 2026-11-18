@@ -5,7 +5,7 @@
 // alignment, reusing the editor's existing formatting infrastructure).
 //
 // Appearance is stored on the node and projected by its renderer. The node view
-// owns the wrapper, including the temporary touch lock, not the cell content.
+// owns the wrapper, not the editable cell content.
 //
 // There are no drag-to-resize handles: the column proportion is a single
 // `leftFraction` (right column is the remainder), adjusted only from the settings
@@ -15,6 +15,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
+import { inlineTextEdit } from "./incremental-nodes.js";
 
 export const LIST_GRID_DEFAULTS = {
   cardBackground: "#F2F2F2",
@@ -158,13 +159,8 @@ export function createListGrid({ post, snapshot, selectionActive }) {
             else if (dom.getAttribute(name) !== value) dom.setAttribute(name, value);
           }
         };
-        const setTouchPending = (pending, held = false) => {
-          dom.toggleAttribute("data-list-grid-touch-pending", pending);
-          if (pending && held) dom.setAttribute("contenteditable", "false");
-          else dom.removeAttribute("contenteditable");
-        };
         render(current.attrs);
-        gridSurfaces.set(dom, { getPos, setTouchPending });
+        gridSurfaces.set(dom, { getPos });
         return {
           dom,
           contentDOM: dom,
@@ -173,9 +169,6 @@ export function createListGrid({ post, snapshot, selectionActive }) {
             if (next.attrs !== current.attrs) render(next.attrs);
             current = next;
             return true;
-          },
-          stopEvent(event) {
-            return dom.getAttribute("contenteditable") === "false" && /^(touch|pointer|mouse|contextmenu)/.test(event.type);
           },
           ignoreMutation(mutation) { return mutation.type === "attributes" && mutation.target === dom; },
           destroy() { gridSurfaces.delete(dom); },
@@ -300,16 +293,26 @@ export function createListGrid({ post, snapshot, selectionActive }) {
     return true;
   }
 
+  function gridIDAt(position) {
+    for (let depth = position.depth; depth > 0; depth--) {
+      const node = position.node(depth);
+      if (node.type.name === "listGrid") return node.attrs.id;
+    }
+    return null;
+  }
+
+  function selectedGridID(editor) {
+    if (!editor.isEditable || selectionActive()) return null;
+    const { $from, $to, empty } = editor.state.selection;
+    const id = gridIDAt($from);
+    return id && (empty || gridIDAt($to) === id) ? id : null;
+  }
+
   function command(editor, name, args = {}) {
     if (typeof name !== "string" || !name.startsWith("listGrid")) return undefined;
 
     if (name === "listGridRequestSelectedSettings") {
-      let gridID = null;
-      const { $from } = editor.state.selection;
-      for (let depth = $from.depth; depth >= 0; depth--) {
-        const node = $from.node(depth);
-        if (node.type.name === "listGrid") { gridID = node.attrs.id; break; }
-      }
+      const gridID = selectedGridID(editor);
       return gridID ? publishSettings(editor, gridID) : false;
     }
     if (name === "listGridRequestSettings") return publishSettings(editor, args.blockId);
@@ -407,7 +410,7 @@ export function createListGrid({ post, snapshot, selectionActive }) {
     // iOS uses the editing host's caret color, not the descendant's color.
     props: { attributes: gridCaretAttributes },
     appendTransaction(transactions, _old, state) {
-      if (!transactions.some(tr => tr.docChanged)) return null;
+      if (!transactions.some(tr => tr.docChanged && !inlineTextEdit(tr))) return null;
       const empties = [];
       state.doc.descendants((node, pos) => {
         if (node.type.name === "listGrid" && node.childCount === 0) empties.push(pos);
@@ -423,5 +426,5 @@ export function createListGrid({ post, snapshot, selectionActive }) {
     },
   });
 
-  return { nodes: [listGrid, listGridRow, listGridLabel, listGridValue], plugins: [guard], command, listGridJSON };
+  return { nodes: [listGrid, listGridRow, listGridLabel, listGridValue], plugins: [guard], command, listGridJSON, selectedGridID };
 }

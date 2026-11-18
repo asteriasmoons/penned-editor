@@ -96,3 +96,54 @@ test("stable node markers keep nested cards, callouts, lists, tables and inserte
     assert.equal(h.paint().length, 0);
   } finally { h.close(); }
 });
+
+test("code viewers can start and join block selection without opening the code sheet", async () => {
+  const code = id => ({ type: "codeBlock", attrs: { id }, content: [{ type: "text", text: "let value = 1" }] });
+  const h = await runtime([
+    { type: "plainCallout", attrs: { id: "container" }, content: [code("first-code")] },
+    code("second-code"),
+  ]);
+  try {
+    const opened = [];
+    h.w.webkit.messageHandlers.tiptap.postMessage = event => {
+      if (event.kind === "codeBlockEdit") opened.push(event.payload.blockID);
+    };
+    const viewer = id => h.editor.view.nodeDOM(h.position(id));
+    const first = viewer("first-code");
+    const target = first.querySelector(".penned-code-text");
+    first.getBoundingClientRect = () => ({ top: 10, bottom: 50, left: 0, right: 300, width: 300, height: 40 });
+    const touch = (type, x, y) => {
+      const event = new h.w.Event(type, { bubbles: true, cancelable: true });
+      const point = { identifier: 1, clientX: x, clientY: y, screenY: y };
+      Object.defineProperty(event, "touches", { value: type === "touchend" ? [] : [point] });
+      Object.defineProperty(event, "changedTouches", { value: [point] });
+      target.dispatchEvent(event);
+      return event;
+    };
+    const selectedIDs = () => Array.from(h.w.PennedBlockSelection.selectedRecords(), record => record.node.attrs.id);
+
+    touch("touchstart", 50, 30);
+    assert.equal(touch("touchmove", 50, 45).defaultPrevented, false, "vertical motion is left to scrolling");
+    touch("touchend", 50, 45);
+    assert.deepEqual(selectedIDs(), []);
+
+    touch("touchstart", 50, 30);
+    assert.equal(touch("touchmove", 85, 30).defaultPrevented, true, "horizontal swipe starts selection from the code text");
+    touch("touchend", 85, 30);
+    assert.deepEqual(selectedIDs(), ["first-code"], "the containing callout is not selected");
+    assert.equal(first.classList.contains("penned-block-selected"), true);
+    target.click();
+    assert.deepEqual(selectedIDs(), ["first-code"], "the swipe's follow-up click is suppressed");
+
+    const second = viewer("second-code").querySelector(".penned-code-number");
+    second.click();
+    assert.deepEqual(selectedIDs(), ["first-code", "second-code"]);
+    second.click();
+    assert.deepEqual(selectedIDs(), ["first-code"]);
+    assert.deepEqual(opened, []);
+
+    await h.w.tiptapCommand("setSelectionMode", { mode: "off" });
+    second.click();
+    assert.deepEqual(opened, ["second-code"], "a normal tap still opens the Code sheet");
+  } finally { h.close(); }
+});
