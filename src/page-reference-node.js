@@ -200,6 +200,7 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
         };
         button.addEventListener("pointerdown", (event) => {
           if (!event.isPrimary || selectionActive()) return;
+          if (window.PennedBlockDragAndDrop?.allowBlockHold(event, "page-actions") === false) return;
           cancelPress();
           menuRequested = false;
           suppressClick = false;
@@ -218,6 +219,7 @@ export function pageReferenceNode({ post, selectionActive, indent }) {
           if (selectionActive()) return;
           event.preventDefault();
           event.stopPropagation();
+          if (window.PennedBlockDragAndDrop?.allowBlockHold(event, "page-actions-contextmenu") === false) return;
           requestActions();
         });
         const open = (event) => {

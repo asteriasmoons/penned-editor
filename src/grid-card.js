@@ -1,5 +1,6 @@
 export const GRID_CARD_DEFAULTS = {
   icon: "sparkle", iconColor: "#ffffff", backgroundColor: "#302d36",
+  titleColor: null, textColor: null,
   title: "", alignment: "left", width: "full", height: 100,
 };
 
@@ -19,6 +20,8 @@ export function gridCardSettings(attrs = {}) {
     icon: typeof attrs.icon === "string" && attrs.icon.trim() ? attrs.icon.trim() : GRID_CARD_DEFAULTS.icon,
     iconColor,
     backgroundColor: opaqueHex(attrs.backgroundColor, defaultBackground),
+    titleColor: opaqueHex(attrs.titleColor, null),
+    textColor: opaqueHex(attrs.textColor, null),
     title: typeof attrs.title === "string" ? attrs.title : "",
     alignment: ["left", "center", "right"].includes(attrs.alignment) ? attrs.alignment : "left",
     width: attrs.width === "half" ? "half" : "full",
@@ -47,7 +50,9 @@ export function gridCardDOMAttributes(attrs) {
     "data-grid-alignment": settings.alignment,
     "data-grid-height": settings.height,
     "data-grid-background": settings.backgroundColor,
-    style: `--vellix-callout-color:${settings.iconColor};--penned-grid-bg:${settings.backgroundColor};--penned-grid-ink:${gridCardInk(settings.backgroundColor)};--penned-grid-height:${settings.height}px;`,
+    "data-grid-title-color": settings.titleColor,
+    "data-grid-text-color": settings.textColor,
+    style: `--vellix-callout-color:${settings.iconColor};--penned-grid-bg:${settings.backgroundColor};--penned-grid-ink:${settings.textColor ?? gridCardInk(settings.backgroundColor)};--penned-grid-title-ink:${settings.titleColor ?? gridCardInk(settings.backgroundColor)};--penned-grid-height:${settings.height}px;`,
   };
 }
 

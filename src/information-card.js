@@ -59,7 +59,7 @@ export function informationCardJSON() {
     child("informationCardTitle", "Information Card"),
     child("informationCardDescription", "Add a description"),
     { type: "informationCardBody", attrs: { id: freshID() }, content: [
-      { type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "Label" }] },
+      { type: "informationCardLabel", content: [{ type: "text", marks: [{ type: "bold" }], text: "Label" }] },
       { type: "paragraph", content: [{ type: "text", text: "Value" }] },
     ] },
   ] };
@@ -81,17 +81,22 @@ export function createInformationCard({ post, snapshot, selectionActive }) {
   const title = Node.create({
     name: "informationCardTitle", content: "inline*", defining: true, selectable: false,
     parseHTML: () => [{ tag: "div[data-information-card-title]" }],
-    renderHTML: () => ["div", { class: "penned-information-card-title", "data-information-card-title": "" }, 0],
+    renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { class: "penned-information-card-title", "data-information-card-title": "" }), 0],
   });
   const description = Node.create({
     name: "informationCardDescription", content: "inline*", defining: true, selectable: false,
     parseHTML: () => [{ tag: "div[data-information-card-description]" }],
-    renderHTML: () => ["div", { class: "penned-information-card-description", "data-information-card-description": "" }, 0],
+    renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { class: "penned-information-card-description", "data-information-card-description": "" }), 0],
+  });
+  const label = Node.create({
+    name: "informationCardLabel", content: "inline*", defining: true, selectable: false,
+    parseHTML: () => [{ tag: "div[data-information-card-label]" }],
+    renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { class: "penned-information-card-label", "data-information-card-label": "" }), 0],
   });
   const body = Node.create({
-    name: "informationCardBody", content: "block+", defining: true, selectable: false,
+    name: "informationCardBody", content: "informationCardLabel? block+", defining: true, selectable: false,
     parseHTML: () => [{ tag: "div[data-information-card-body]" }],
-    renderHTML: () => ["div", { class: "penned-information-card-body", "data-information-card-body": "" }, 0],
+    renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { class: "penned-information-card-body", "data-information-card-body": "" }), 0],
   });
   const card = Node.create({
     name: "informationCard", group: "block", content: "informationCardTitle informationCardDescription informationCardBody",
@@ -100,8 +105,90 @@ export function createInformationCard({ post, snapshot, selectionActive }) {
     parseHTML: () => [{ tag: "div[data-information-card]" }],
     renderHTML: ({ node, HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, attrsHTML(node.attrs)), 0],
     addProseMirrorPlugins() {
+      const emit = (stage, details = {}) => post("informationCardDeletionDiagnostic", { stage, ...details });
+      const inspect = state => {
+        const { selection } = state;
+        const $from = selection.$from;
+        const path = Array.from({ length: $from.depth + 1 }, (_, depth) => $from.node(depth).type.name);
+        let body = null;
+        for (let depth = $from.depth; depth > 0; depth--) {
+          if ($from.node(depth).type.name !== "informationCardBody") continue;
+          const node = $from.node(depth);
+          body = { childCount: node.childCount, children: node.content.content.map(child => ({ type: child.type.name, size: child.content.size })) };
+          break;
+        }
+        return { from: selection.from, to: selection.to, empty: selection.empty,
+          parentOffset: $from.parentOffset, path, body, docSize: state.doc.content.size };
+      };
+      let pending = false;
+      const protectValue = (view, event) => {
+        if (event.type === "keydown" && event.key !== "Backspace") return;
+        if (event.type === "beforeinput" && event.inputType !== "deleteContentBackward") return;
+        if (!event.cancelable || !view.editable) return;
+        const { selection } = view.state;
+        if (!selection.empty || selection.$from.parent.type.name !== "paragraph" || selection.$from.parentOffset !== 0) return;
+        const $from = selection.$from;
+        for (let depth = $from.depth - 1; depth > 0; depth--) {
+          if ($from.node(depth).type.name !== "informationCardBody") continue;
+          const body = $from.node(depth);
+          const index = $from.index(depth);
+          const firstValue = body.firstChild?.type.name === "informationCardLabel" ? 1 : 0;
+          if (index === firstValue && $from.parent.content.size === 0) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            emit("protected-value", { selection: inspect(view.state) });
+          }
+          return;
+        }
+      };
       return [new Plugin({
+        view: view => {
+          emit("installed", { source: "information-card.js" });
+          const onDelete = event => {
+            const isDelete = event.type === "keydown"
+              ? ["Backspace", "Delete"].includes(event.key)
+              : ["deleteContentBackward", "deleteContentForward"].includes(event.inputType);
+            if (!isDelete) return;
+            protectValue(view, event);
+            pending = true;
+            emit("before", { eventType: event.type, inputType: event.inputType ?? null,
+              key: event.key ?? null, cancelable: event.cancelable,
+              prevented: event.defaultPrevented, selection: inspect(view.state) });
+            setTimeout(() => {
+              emit("after", { eventType: event.type, prevented: event.defaultPrevented,
+                selection: inspect(view.state) });
+              pending = false;
+            }, 100);
+          };
+          view.dom.ownerDocument.addEventListener("keydown", onDelete, true);
+          view.dom.ownerDocument.addEventListener("beforeinput", onDelete, true);
+          return { destroy: () => {
+            view.dom.ownerDocument.removeEventListener("keydown", onDelete, true);
+            view.dom.ownerDocument.removeEventListener("beforeinput", onDelete, true);
+          } };
+        },
         appendTransaction(transactions, previous, state) {
+          // Upgrade legacy cards whose label was the first ordinary paragraph.
+          const legacy = [];
+          state.doc.descendants((node, pos) => {
+            if (node.type.name !== "informationCardBody" || node.childCount < 2 ||
+                node.firstChild.type.name !== "paragraph") return;
+            legacy.push({ pos: pos + 1, node: node.firstChild });
+          });
+          if (legacy.length) {
+            const tr = state.tr;
+            for (const item of legacy.reverse()) {
+              tr.replaceWith(item.pos, item.pos + item.node.nodeSize,
+                state.schema.nodes.informationCardLabel.create(null, item.node.content, item.node.marks));
+            }
+            emit("legacy-label-migration", { count: legacy.length });
+            return tr.setMeta("addToHistory", false);
+          }
+          if (pending && transactions.some(tr => tr.docChanged || tr.selectionSet)) {
+            emit("transaction", { changes: transactions.map(tr => ({ docChanged: tr.docChanged,
+              selectionSet: tr.selectionSet, steps: tr.steps.map(step => step.constructor.name) })),
+              before: inspect(previous), after: inspect(state) });
+          }
           if (previous.selection.eq(state.selection) && !transactions.some(tr => tr.docChanged || tr.selectionSet)) return null;
           const hiddenCards = new Set();
           for (const position of [state.selection.$from, state.selection.$to]) {
@@ -221,5 +308,5 @@ export function createInformationCard({ post, snapshot, selectionActive }) {
     post("informationCardSettings", { blockId: node.attrs.id, ...appearance(node.attrs) });
     return true;
   }
-  return { nodes: [card, title, description, body], command, requestSettings };
+  return { nodes: [card, title, description, label, body], command, requestSettings };
 }

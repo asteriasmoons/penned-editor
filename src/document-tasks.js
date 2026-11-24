@@ -196,7 +196,7 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
             const copy = fragment => Fragment.fromArray(Array.from({ length: fragment.childCount }, (_, i) => {
               const node = fragment.child(i);
               if (node.isText) return node;
-              const attrs = node.attrs.trackedTask ? { ...node.attrs, id: crypto.randomUUID(), trackedTask: independentTask(node.attrs.trackedTask) } : node.attrs;
+              const attrs = node.attrs;
               return node.type.create(attrs, copy(node.content), node.marks);
             }));
             return new Slice(copy(slice.content), slice.openStart, slice.openEnd);
@@ -208,7 +208,7 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
           const records = taskIndex(state.doc).records;
           const stable = records.filter(record => previousNodes.has(record.node));
           const seenBlocks = new Set(stable.map(record => record.node.attrs.id));
-          const seenTasks = new Set(stable.map(record => record.node.attrs.trackedTask?.id).filter(Boolean)), tr = state.tr;
+          const tr = state.tr;
           for (const { node, pos } of records) {
             if (previousNodes.has(node)) continue;
             const attrs = { ...node.attrs };
@@ -217,14 +217,8 @@ export function createTaskIntegration({ Extension, Plugin, PluginKey, post, sele
             // document before publishing selection state or targeting task commands.
             if (!blockID || seenBlocks.has(blockID)) attrs.id = crypto.randomUUID();
             else attrs.id = blockID;
-            const task = node.attrs.trackedTask;
-            if (task && seenTasks.has(task.id)) {
-              attrs.id = crypto.randomUUID();
-              attrs.trackedTask = independentTask(task);
-            }
             seenBlocks.add(attrs.id);
-            if (attrs.trackedTask) seenTasks.add(attrs.trackedTask.id);
-            if (attrs.id !== node.attrs.id || attrs.trackedTask !== task) tr.setNodeMarkup(pos, undefined, attrs);
+            if (attrs.id !== node.attrs.id) tr.setNodeMarkup(pos, undefined, attrs);
           }
           return tr.docChanged ? tr : null;
         },
@@ -308,18 +302,27 @@ export function taskCommand(editor, name, args, post, canonicalize) {
   }
   if (name === "taskConvert") {
     attrs.trackedTask = args.enabled ? (current || args.task) : null;
+    editor.view.dispatch(closeHistory(editor.state.tr.setNodeMarkup(target.pos, undefined, attrs)));
   } else {
     if (!current || current.id !== args.taskID) return false;
-    if (name === "taskComplete") {
-      if (!args.external && current.occurrenceID !== args.expectedOccurrenceID) return false;
-      attrs.trackedTask = args.task; attrs.checked = args.checked;
-      attrs.crossed = false;
-    } else {
-      attrs.trackedTask = { ...current, ...args.configuration };
-    }
+    if (name === "taskComplete" && !args.external && current.occurrenceID !== args.expectedOccurrenceID) return false;
+    const updated = name === "taskComplete" ? args.task : { ...current, ...args.configuration };
+    const shared = editor.state.tr;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== "taskItem" || node.attrs.trackedTask?.id !== args.taskID) return;
+      const nextChecked = name === "taskComplete" ? args.checked : node.attrs.checked;
+      const nextCrossed = name === "taskComplete" ? false : node.attrs.crossed;
+      if (JSON.stringify(node.attrs.trackedTask) === JSON.stringify(updated) &&
+          node.attrs.checked === nextChecked && node.attrs.crossed === nextCrossed) return;
+      shared.setNodeMarkup(pos, undefined, {
+        ...node.attrs, trackedTask: updated, checked: nextChecked, crossed: nextCrossed,
+      });
+    });
+    if (shared.docChanged) editor.view.dispatch(closeHistory(shared));
   }
-  editor.view.dispatch(closeHistory(editor.state.tr.setNodeMarkup(target.pos, undefined, attrs)));
-  editor.view.dispatch(closeHistory(editor.state.tr));
-  taskSnapshot(editor.state.doc, post, canonicalize);
+  if (name === "taskConvert" || name === "taskConfigure" || name === "taskComplete") {
+    editor.view.dispatch(closeHistory(editor.state.tr));
+    taskSnapshot(editor.state.doc, post, canonicalize);
+  }
   return true;
 }

@@ -87,6 +87,8 @@ export function createBlockActions({ editor, blocks, elementForBlock, selectionA
     pointers.add(event.pointerId);
     cancelHold();
     request = null;
+    // iOS reordering owns touch holds; keep mouse context menus unchanged.
+    if (window.PennedBlockDragAndDrop?.allowBlockHold(event, "block-actions") === false) return;
     if (pointers.size !== 1 || event.isPrimary === false || event.button !== 0) return;
     suppressedClick = null;
     if (grid || !eligibleSurface(target)) return;
@@ -120,6 +122,9 @@ export function createBlockActions({ editor, blocks, elementForBlock, selectionA
   window.addEventListener("blur", () => { pointers.clear(); cancelHold(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) { pointers.clear(); reset(); } });
   document.addEventListener("contextmenu", event => {
+    if (window.PennedBlockDragAndDrop?.allowBlockHold(event, "block-actions-contextmenu") === false) {
+      event.preventDefault(); return;
+    }
     const target = event.target;
     const grid = (target instanceof window.Element ? target : target?.parentElement)?.closest("[data-list-grid]");
     if (grid) {

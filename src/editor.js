@@ -1,3 +1,8 @@
+import { insertionBookmark, insertionRange } from "./existing-event-insertion.js";
+import { linkedCalendarEventJSON, updateLinkedCalendarEventJSON } from "./linked-calendar-event-model.js";
+import { insertionPanelDepth } from "./week-strip-insertion.js";
+import { ensureCalendarInsertionSelection, selectionInsideCalendar, activeCalendarTarget, forgetActiveCalendar, appendParagraphToCalendarDate } from "./calendar-insertion-target.js";
+import { LinkedCalendarEvent } from "./linked-calendar-event.js";
 // Bundle entry for the Vellix TipTap editor.
 //
 // Same bridge shape as Lurelia:
@@ -8,7 +13,7 @@ import { Editor, Extension, Node, getRenderedAttributes, mergeAttributes } from 
 import { AllSelection, NodeSelection, Plugin, PluginKey, TextSelection, Selection, SelectionRange } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { DOMSerializer, Fragment, Slice } from "@tiptap/pm/model";
-import { canSplit, ReplaceStep, Transform } from "@tiptap/pm/transform";
+import { canSplit, ReplaceStep, Transform, Step, StepResult } from "@tiptap/pm/transform";
 import { keydownHandler } from "@tiptap/pm/keymap";
 import { closeHistory, isHistoryTransaction } from "@tiptap/pm/history";
 import { createTextColor, textColorDependencies } from "./text-color.js";
@@ -20,6 +25,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { createTemplateComponents } from "./template-components.js";
 import { createDocumentTags, taggedInlineContent } from "./document-tags.js";
 import { createAttachments, containsAttachments, attachmentURL } from "./attachments.js";
+import { freshClipboardBlockIDs } from "./block-clipboard-ids.js";
 import { clipSource, clipPreview } from "./clip-source.js";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
@@ -39,10 +45,13 @@ import { collectionNode, setCollections, setNativeCollectionHeight, iconAssetCSS
 import { createListGrid } from "./list-grid.js";
 import { createCodeBlocks } from "./code-block.js";
 import { createTabs } from "./tabs.js";
+import { WeekStrip, WeekDayPanel, navigateWeekStripJSON, weekStripJSON } from "./week-strip.js";
+import { updateWeekStripAppearanceJSON } from "./week-strip-settings.js";
 import { bindNonEditingTap } from "./editor-control-activation.js";
 import { createMinimalFields } from "./minimal-fields.js";
 import { createInformationCard, informationCardJSON } from "./information-card.js";
 import { GRID_CARD_DEFAULTS, gridCardSettings, gridCardDOMAttributes, newGridCard } from "./grid-card.js";
+import { gridCardSettingDifferences, gridCardSettingTypes } from "./grid-card-diagnostics.js";
 import { ICON_CALLOUT_DEFAULTS, iconCalloutNode, iconCalloutSettings, plainCalloutSettings, plainCalloutSurface } from "./icon-callout.js";
 import { createLabelHeading, labelLevel, labelSettings, updateHeadingLabel } from "./heading-label.js";
 import { createDocumentLinks, richLinkLayout, richLinkMetadata, webLinkURL } from "./document-links.js";
@@ -403,7 +412,7 @@ function plainText(node) {
   if (node.type === "inlineTag") return "#" + (node.attrs?.name ?? "");
   if (node.type === "inlineProperty") return propertyText(node.attrs?.property);
   if (node.type === "attachment") return typeof node.attrs?.file?.name === "string" ? node.attrs.file.name : "";
-  if (node.type === "gridCard") return [node.attrs?.title, plainText(node.content)].filter(Boolean).join(" ");
+  if (["gridCard", "iconCallout"].includes(node.type)) return [node.attrs?.title, plainText(node.content)].filter(Boolean).join(" ");
   const own = typeof node.text === "string" ? node.text : "";
   const content = plainText(node.content);
   const children = plainText(node.children);
@@ -833,6 +842,20 @@ function applyAppearance(payload = {}) {
   applyEditorAppearance(document.documentElement, payload);
 }
 
+// Shared persistent block-id attribute. Stored on attrs.id, serialized into the
+// canonical TipTap JSON, and mirrored to the data-vellix-block-id HTML attribute
+// for clipboard round-trips. Reused by every block and structural node that
+// carries an id, so there is one id format and one generation path.
+const persistentBlockId = {
+  default: null,
+  keepOnSplit: false,
+  parseHTML: (element) => element.getAttribute("data-vellix-block-id"),
+  renderHTML: (attrs) =>
+    typeof attrs.id === "string" && attrs.id.trim()
+      ? { "data-vellix-block-id": attrs.id }
+      : {},
+};
+
 const BlockID = Extension.create({
   name: "vellixBlockID",
   addGlobalAttributes() {
@@ -865,15 +888,7 @@ const BlockID = Extension.create({
           "collection",
         ],
         attributes: {
-          id: {
-            default: null,
-            keepOnSplit: false,
-            parseHTML: (element) => element.getAttribute("data-vellix-block-id"),
-            renderHTML: (attrs) =>
-              typeof attrs.id === "string" && attrs.id.trim()
-                ? { "data-vellix-block-id": attrs.id }
-                : {},
-          },
+          id: persistentBlockId,
           textAlign: {
             default: null,
             parseHTML: (element) => element.style.textAlign || null,
@@ -894,6 +909,21 @@ const BlockID = Extension.create({
           },
         },
       },
+      {
+        // Structural nodes inside List Grids and Information Cards. They need a
+        // persistent id so the whole document tree is addressable (e.g. by a
+        // future REST API), but not alignment/indent — those stay block-only.
+        types: [
+          "listGridRow",
+          "listGridLabel",
+          "listGridValue",
+          "informationCardTitle",
+          "informationCardDescription",
+          "informationCardBody",
+          "informationCardLabel",
+        ],
+        attributes: { id: persistentBlockId },
+      },
     ];
   },
   addProseMirrorPlugins() {
@@ -905,7 +935,12 @@ const BlockID = Extension.create({
     const autoIdTypes = new Set([
       "paragraph", "caption", "heading", "codeBlock", "blockquote",
       "bulletList", "orderedList", "listItem", "taskList",
-      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid", "tabs", "minimalFields", "informationCard", "gridCard", "iconCallout", "richLink",
+      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid", "tabs", "weekStrip", "minimalFields", "informationCard", "gridCard", "iconCallout", "richLink",
+      // Structural nodes inside List Grids and Information Cards. createNodeIndex
+      // descends into matched nodes, so these are assigned and de-duplicated even
+      // though they are nested inside their container.
+      "listGridRow", "listGridLabel", "listGridValue",
+      "informationCardTitle", "informationCardDescription", "informationCardBody", "informationCardLabel",
     ]);
     const accepts = (node) => autoIdTypes.has(node.type.name);
     return [new Plugin({
@@ -1042,7 +1077,9 @@ const GridCard = Node.create({
       contentElement: element => element.querySelector(":scope > .vellix-callout-text") ?? element,
       getAttrs: element => gridCardSettings({
         icon: element.dataset.calloutIcon, color: element.dataset.calloutColor,
-        backgroundColor: element.dataset.gridBackground, width: element.dataset.gridWidth,
+        backgroundColor: element.dataset.gridBackground,
+        titleColor: element.dataset.gridTitleColor, textColor: element.dataset.gridTextColor,
+        width: element.dataset.gridWidth,
         alignment: element.dataset.gridAlignment, height: element.dataset.gridHeight,
         title: element.querySelector(":scope > .penned-grid-card-header > .penned-grid-card-title")?.textContent,
       }),
@@ -1084,6 +1121,8 @@ const GridCard = Node.create({
 });
 
 const IconCallout = iconCalloutNode({
+  selectionActive: () => selectionMode !== "off",
+  reportHeight: () => requestAnimationFrame(reportContentHeight),
   renderLibraryIcon: (icon, color) => ["span", {
     class: "vellix-callout-icon-image", role: "img", "aria-label": icon,
     style: `background-image:${cssBackgroundImageSource(iconSource(icon, color, 22))};`,
@@ -1142,16 +1181,14 @@ const PlainCallout = Node.create({
       Enter: ({ editor }) => {
         const selection = editor.state.selection;
         const { $from, $to } = selection;
-        for (let depth = $from.depth; depth > 0; depth -= 1) {
-          const callout = $from.node(depth);
-          if (callout.type.name !== "plainCallout") continue;
-          if (!clipSource(callout.attrs.clipSource)) return false;
-          if (!editor.isEditable || selectionMode !== "off") return true;
-          if ($from.depth !== depth + 1 || $from.parent.type.spec.code || !$from.sameParent($to)) return false;
-
-          return editor.commands.setHardBreak();
-        }
-        return false;
+        // Nested lists and containers own their own Return, even when an outer
+        // clipped-source callout has a special direct-paragraph shortcut.
+        if ($from.depth < 2 || $from.node(-1).type.name !== "plainCallout") return false;
+        const callout = $from.node(-1);
+        if (!clipSource(callout.attrs.clipSource)) return false;
+        if (!editor.isEditable || selectionMode !== "off") return true;
+        if ($from.parent.type.spec.code || !$from.sameParent($to)) return false;
+        return editor.commands.setHardBreak();
       },
     };
   },
@@ -1270,15 +1307,15 @@ const ToggleItem = Node.create({
       // Enter at the end of the toggle's summary line drops the cursor into a
       // NEW paragraph INSIDE the toggle body (Notion behavior). Also force-
       // opens the toggle if it was collapsed so the new line is visible.
-      // Enter inside the body works normally (this returns false so TipTap's
-      // default splitBlock runs).
+      // Only direct summary/body textblocks belong to this shortcut. Nested
+      // lists, callouts, tables, and other containers retain their own handlers.
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection;
         if (!empty) return false;
         for (let depth = $from.depth; depth > 0; depth -= 1) {
           if ($from.node(depth).type.name !== "toggleItem") continue;
           const childDepth = depth + 1;
-          if ($from.depth < childDepth) return false;
+          if ($from.depth !== childDepth) return false;
           const isFirstChild = $from.index(depth) === 0;
           const isAtEnd = $from.parentOffset === $from.parent.content.size;
           if (!isFirstChild) {
@@ -1567,7 +1604,7 @@ const documentLinks = createDocumentLinks({ post: postToSwift, canEdit: () => li
 // handles its own Enter). Nested blocks are matched by their DIRECT parent, so a
 // paragraph inside a toggle inside a card is still handled by the toggle.
 const BLOCK_SPLIT_CONTAINERS = new Set([
-  "blockquote", "iconCallout", "plainCallout", "informationCardBody", "minimalFieldValue", "tabPanel",
+  "blockquote", "iconCallout", "plainCallout", "informationCardBody", "minimalFieldValue", "tabPanel", "weekDayPanel",
 ]);
 const BlockContainerEnterFix = Extension.create({
   name: "blockContainerEnterFix",
@@ -1600,6 +1637,9 @@ const BlockContainerEnterFix = Extension.create({
     };
   },
 });
+// One-shot guard so the native-clipboard paste interceptor lets a Swift-driven
+// WebKit fallback paste through instead of re-intercepting it (prevents a loop).
+let pennedPasteBypass = false;
 const editor = new Editor({
   element: document.getElementById("editor"),
   extensions: [
@@ -1611,7 +1651,7 @@ const editor = new Editor({
     LegacyToggleFollowers,
     calloutRow({ selectionActive: () => selectionMode !== "off" }),
     ...(window.PennedBlockSelection?.extensions({ Extension, Plugin, PluginKey, Decoration, DecorationSet,
-      closeHistory, post: postToSwift, modeChanged: mode => { selectionMode = mode; } }) ?? []),
+      Fragment, Selection, Step, StepResult, closeHistory, post: postToSwift, modeChanged: mode => { selectionMode = mode; } }) ?? []),
     ...window.VellixTables.createExtensions({ Node, Extension, Plugin, PluginKey, Decoration, DecorationSet, TextSelection,
       post: postToSwift, selectionActive: () => selectionMode !== "off",
       modules: { "prosemirror-state": { Plugin, PluginKey, TextSelection, NodeSelection, Selection, SelectionRange },
@@ -1630,6 +1670,9 @@ const editor = new Editor({
     ListGridGuard,
     ...tabsModule.nodes,
     TabsGuard,
+    WeekStrip.configure({ post: postToSwift, reportHeight: () => requestAnimationFrame(reportContentHeight) }),
+    LinkedCalendarEvent,
+    WeekDayPanel,
     ...minimalFieldsModule.nodes,
     ...informationCardModule.nodes,
     documentLinks.node,
@@ -1681,6 +1724,73 @@ const editor = new Editor({
     attributes: {
       class: "tiptap-editor",
       spellcheck: "false",
+    },
+    handleDOMEvents: {
+      // WebKit sanitizes the HTML clipboard, stripping the data-* attributes that
+      // carry a block's identity and settings, so an ordinary iOS paste collapses
+      // rich blocks to plain text. For a selection that contains a structured block
+      // we instead stash a lossless ProseMirror slice on the native pasteboard
+      // (the sanitizer never touches a private UTI) alongside the normal HTML/text.
+      // Plain inline/paragraph copies are left entirely to the browser.
+      copy(view, event) {
+        try {
+          if (selectionMode !== "off") return false;
+          const slice = view.state.selection.content();
+          if (!slice.size) return false;
+          let rich = false;
+          slice.content.forEach(node => {
+            if (node.isBlock && node.type.name !== "paragraph") rich = true;
+            node.descendants(child => { if (child.isBlock && child.type.name !== "paragraph") rich = true; });
+          });
+          if (!rich) return false;
+          const serializer = DOMSerializer.fromSchema(view.state.schema);
+          const wrapper = document.createElement("div");
+          wrapper.appendChild(serializer.serializeFragment(slice.content));
+          const html = wrapper.innerHTML;
+          const text = slice.content.textBetween(0, slice.content.size, "\n\n", "\n");
+          const nativeJSON = JSON.stringify({ format: "penned-slice", version: 1, slice: slice.toJSON() });
+          postToSwift("attachmentClipboard", { token: crypto.randomUUID(), html, text, nativeJSON });
+          event.preventDefault();
+          return true;
+        } catch (_error) { return false; }
+      },
+      // Route every editor paste through the native layer, which reconstructs the
+      // lossless slice when the private pasteboard type is present and otherwise
+      // re-issues an ordinary WebKit paste (which this handler lets through).
+      paste(view, event) {
+        try {
+          if (pennedPasteBypass) { pennedPasteBypass = false; return false; }
+          if (selectionMode !== "off" || !view.editable) return false;
+          pennedPasteBypass = true;
+          setTimeout(() => { pennedPasteBypass = false; }, 1000);
+          event.preventDefault();
+          postToSwift("editorSmartPaste", {});
+          return true;
+        } catch (_error) { pennedPasteBypass = false; return false; }
+      },
+    },
+    transformPastedText(text) {
+      // Repair recognizable UTF-8 punctuation decoded as Windows-1252.
+      // Leave correctly encoded text and unrelated characters untouched.
+      return text
+        .replace(/â€™/g, "’")
+        .replace(/â€˜/g, "‘")
+        .replace(/â€œ/g, "“")
+        .replace(/â€\x9d/g, "”")
+        .replace(/â€“/g, "–")
+        .replace(/â€”/g, "—")
+        .replace(/â€¦/g, "…");
+    },
+    transformPastedHTML(html) {
+      // Some apps put HTML on the clipboard even when only text is selected.
+      return html
+        .replace(/â€™/g, "’")
+        .replace(/â€˜/g, "‘")
+        .replace(/â€œ/g, "“")
+        .replace(/â€\x9d/g, "”")
+        .replace(/â€“/g, "–")
+        .replace(/â€”/g, "—")
+        .replace(/â€¦/g, "…");
     },
   },
   onUpdate: ({ editor, transaction, appendedTransactions = [] }) => {
@@ -2309,6 +2419,11 @@ function selectionRecordForEvent(event) {
     const tabsRecord = records.find(record => record.node.type.name === "tabs" && record.element === tabs);
     if (tabsRecord) return tabsRecord;
   }
+  const weekStrip = event.target.closest?.(".penned-week-strip[data-week-strip]");
+  if (weekStrip && (event.target === weekStrip || event.target.closest?.(".penned-week-strip-chrome"))) {
+    const weekStripRecord = records.find(record => record.node.type.name === "weekStrip" && record.element === weekStrip);
+    if (weekStripRecord) return weekStripRecord;
+  }
   const closestBlock = event.target.closest?.("[data-vellix-selection-block='true']");
   if (
     closestBlock instanceof HTMLElement &&
@@ -2927,10 +3042,29 @@ function findGridCard(blockID, type = "gridCard") {
   return found;
 }
 
+function gridCardDiagnostic(stage, blockID, details = {}) {
+  postToSwift("gridCardDiagnostic", {
+    stage, blockID: typeof blockID === "string" ? blockID : "",
+    ...details,
+  });
+}
+
 function requestGridCard(blockID, type = "gridCard") {
-  if (!editor.isEditable || selectionMode !== "off") return false;
+  if (!editor.isEditable || selectionMode !== "off") {
+    if (type === "gridCard") gridCardDiagnostic("open-rejected", blockID, {
+      reason: !editor.isEditable ? "editor-read-only" : "block-selection-mode",
+    });
+    return false;
+  }
   const target = findGridCard(blockID, type);
-  if (!target || (type === "plainCallout" && clipSource(target.node.attrs.clipSource))) return false;
+  if (!target || (type === "plainCallout" && clipSource(target.node.attrs.clipSource))) {
+    if (type === "gridCard") gridCardDiagnostic("open-rejected", blockID, { reason: "block-not-found" });
+    return false;
+  }
+  if (type === "gridCard") gridCardDiagnostic("open", blockID, {
+    position: target.pos, contentBlocks: target.node.childCount,
+    settingTypes: gridCardSettingTypes(gridCardSettings(target.node.attrs)),
+  });
   editor.commands.blur();
   postToSwift(type === "gridCard" ? "gridCardSettings" : "iconCalloutSettings",
     { blockID, node: target.node.toJSON(), appearance: editorAppearance });
@@ -2938,17 +3072,48 @@ function requestGridCard(blockID, type = "gridCard") {
 }
 
 function commitGridCard({ blockID, original, settings, text, originalText }, type = "gridCard") {
-  if (!editor.isEditable || selectionMode !== "off" || !isRecord(settings) || !isRecord(original)) return false;
+  const diagnostic = type === "gridCard";
+  if (diagnostic) gridCardDiagnostic("save-requested", blockID, {
+    editable: editor.isEditable, selectionMode,
+    originalTypes: gridCardSettingTypes(original),
+    requestedTypes: gridCardSettingTypes(settings),
+    requestedChanges: gridCardSettingDifferences(original, settings),
+  });
+  if (!editor.isEditable || selectionMode !== "off" || !isRecord(settings) || !isRecord(original)) {
+    if (diagnostic) gridCardDiagnostic("save-rejected", blockID, {
+      reason: !editor.isEditable ? "editor-read-only" : selectionMode !== "off" ? "block-selection-mode" : "invalid-settings-payload",
+    });
+    return false;
+  }
   const target = findGridCard(blockID, type);
-  if (!target) return false;
+  if (!target) {
+    if (diagnostic) gridCardDiagnostic("save-rejected", blockID, { reason: "block-not-found" });
+    return false;
+  }
   if (type === "plainCallout" && clipSource(target.node.attrs.clipSource)) return false;
   const normalize = type === "plainCallout" ? plainCalloutSettings : type === "iconCallout" ? iconCalloutSettings : gridCardSettings;
-  const before = JSON.stringify(normalize(target.node.attrs));
+  const current = normalize(target.node.attrs);
+  const initial = normalize(original);
+  const before = JSON.stringify(current);
   const after = normalize(settings);
   const attrsChanged = before !== JSON.stringify(after);
   const textChanged = type !== "gridCard" && typeof text === "string" && text !== originalText;
+  if (diagnostic) gridCardDiagnostic("save-validation", blockID, {
+    position: target.pos, contentBlocks: target.node.childCount,
+    originalMatchesCurrent: before === JSON.stringify(initial),
+    changedSinceOpen: gridCardSettingDifferences(initial, current),
+    requestedChanges: gridCardSettingDifferences(current, after),
+    initialTypes: gridCardSettingTypes(initial), currentTypes: gridCardSettingTypes(current),
+    attrsChanged,
+  });
   if (attrsChanged || textChanged) {
-    if (before !== JSON.stringify(normalize(original))) return false;
+    if (before !== JSON.stringify(initial)) {
+      if (diagnostic) gridCardDiagnostic("save-rejected", blockID, {
+        reason: "original-settings-mismatch",
+        changedSinceOpen: gridCardSettingDifferences(initial, current),
+      });
+      return false;
+    }
     const tr = closeHistory(editor.state.tr);
     if (attrsChanged) tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, ...after });
     if (textChanged) {
@@ -2961,6 +3126,9 @@ function commitGridCard({ blockID, original, settings, text, originalText }, typ
     }
     editor.view.dispatch(tr);
   }
+  if (diagnostic) gridCardDiagnostic("save-accepted", blockID, {
+    applied: attrsChanged, position: findGridCard(blockID, type)?.pos ?? null,
+  });
   return snapshotPayload();
 }
 
@@ -3679,6 +3847,24 @@ function deleteSelected(immediateSnapshot = false, removeListRows = false) {
   return editor.state.doc !== before;
 }
 
+// A page card only references a page by documentID; two cards pointing at the
+// same id share one page. When a card is duplicated or pasted we clear its
+// documentID (the card briefly shows as pending) and queue it, keyed by its
+// already-freshened block id, so native can clone the page into an independent
+// copy and repoint this card at it. Nested cards inside are queued too.
+function detachPageReferences(nodes, pending) {
+  const walk = node => {
+    if (node && node.type === "pageReference" && node.attrs &&
+        typeof node.attrs.documentID === "string" && node.attrs.documentID &&
+        typeof node.attrs.id === "string" && node.attrs.id) {
+      pending.push({ blockId: node.attrs.id, sourceDocumentID: node.attrs.documentID });
+      node.attrs = { ...node.attrs, documentID: "" };
+    }
+    if (node && Array.isArray(node.content)) node.content.forEach(walk);
+  };
+  (nodes || []).forEach(walk);
+}
+
 function duplicateSelected() {
   const selectedByPath = selectedBlockIndexMap();
   if (!selectedByPath.size) {
@@ -3687,24 +3873,39 @@ function duplicateSelected() {
   }
   const nextDocument = normalizeTipTapDocument(editor.getJSON());
   const fileOperation = containsAttachments([...selectedByPath.values()].map(block => block.json));
-  const copyFileBlock = node => ({ ...node, ...(node.attrs ? { attrs: { ...node.attrs, id: id() } } : {}),
-    ...(node.content ? { content: node.content.map(copyFileBlock) } : {}) });
+  // Give the duplicate its own identity: deep-clone, then regenerate every nested
+  // block/card id (and remap internal references such as a tabs block's active
+  // tab) with the same helper the clipboard paste uses. Without fresh ids the copy
+  // keeps the original's ids, so editing one block's settings retargets the other.
+  // Page cards are also detached below so native clones their page into an
+  // independent copy rather than sharing the original's page.
+  const pageClones = [];
   const duplicateNodes = (nodes, parentPath = []) => nodes.flatMap((node, index) => {
     const path = [...parentPath, index];
     const nodeWithChildren = node.content ? { ...node, content: duplicateNodes(node.content, path) } : node;
     if (!selectedByPath.has(pathKey(path))) return [nodeWithChildren];
-    return [nodeWithChildren, normalizeTipTapNode(fileOperation ? copyFileBlock(nodeWithChildren) : JSON.parse(JSON.stringify(nodeWithChildren)))];
+    const copy = normalizeTipTapNode(freshClipboardBlockIDs([JSON.parse(JSON.stringify(nodeWithChildren))])[0]);
+    detachPageReferences([copy], pageClones);
+    return [nodeWithChildren, copy];
   });
   nextDocument.content = duplicateNodes(nextDocument.content);
   if (fileOperation) editor.view.dispatch(closeHistory(editor.state.tr));
   selection.clear();
   commitDocument(nextDocument);
   if (fileOperation) { editor.view.dispatch(closeHistory(editor.state.tr)); postToSwift("snapshot", snapshotPayload()); }
+  if (pageClones.length) postToSwift("clonePageReferences", { pairs: pageClones });
 }
 
 async function copySelected() {
-  const blocks = selectedBlocks();
-  if (!blocks) return false;
+  // Preserve the exact selected node trees for the native Penned clipboard.
+  // The normalizer used elsewhere can change attrs and is not a copy format.
+  const blocks = topLevelModelBlocks()
+    .filter(block => selection.has(block.key))
+    .map(block => block.node.toJSON());
+  if (!blocks.length) {
+    postToSwift("error", { message: "Select at least one block first." });
+    return false;
+  }
   const copiedFiles = await attachments.copyBlocks(editor, blocks, plainText(blocks));
   if (copiedFiles !== undefined) return copiedFiles;
   try {
@@ -3769,7 +3970,15 @@ function placeGroupedPage(token, documentID) {
 }
 
 function insertNode(node) {
-  editor.commands.insertContentAt(editor.state.doc.content.size, normalizeTipTapNode(node));
+  // Direct native insertions (e.g. Divider) share the same Calendar target as
+  // the Add Block menu instead of always appending at the document root.
+  const tr = editor.state.tr;
+  const activeCalendar = ensureCalendarInsertionSelection(tr);
+  if (activeCalendar && (tr.docChanged || tr.selectionSet)) editor.view.dispatch(tr.setMeta("addToHistory", false));
+  if (selectionInsideCalendar(editor.state.selection)) {
+    return editor.commands.insertContent(normalizeTipTapNode(node));
+  }
+  return editor.commands.insertContentAt(editor.state.doc.content.size, normalizeTipTapNode(node));
 }
 
 function blockNodeForKey(key) {
@@ -3902,14 +4111,42 @@ function insertContainerAtBlockBoundary(tr, node, range, depth) {
 }
 
 function panelChildDepth($cursor) {
-  for (let depth = $cursor.depth - 1; depth > 0; depth--) {
-    if ($cursor.node(depth).type.name === "tabPanel") return depth + 1;
-  }
-  return 1;
+  return insertionPanelDepth($cursor);
 }
 
+let pendingExistingEventConversion = null;
 function insertBlockByKey(key, range = null, color = null, insertionToken = null) {
   if (!editor.isEditable || selectionMode !== "off") return false;
+  if (insertionToken && !restoreCaretInsertion(editor, insertionToken)) return false;
+  // Native Add Block > Paragraph must create/focus the paragraph *inside* the
+  // last selected date. Calling a generic chain.focus() here can resurrect
+  // WebKit's old caret in the Infocard above the Calendar on iOS.
+  const rememberedCalendar = activeCalendarTarget(editor);
+  if (key === "paragraph" && !range && !insertionToken && rememberedCalendar) {
+    const tr = editor.state.tr;
+    const result = appendParagraphToCalendarDate(tr, rememberedCalendar);
+    if (result) {
+      editor.view.dispatch(tr.scrollIntoView());
+      editor.view.focus();
+      postToSwift("calendarDiagnostic", { stage: "insert-paragraph-caret", blockID: result.stripID,
+        date: result.date, position: editor.state.selection.from, inserted: result.inserted });
+      requestAnimationFrame(reportContentHeight);
+      return true;
+    }
+  }
+  // One shared insertion target for every Add Block/toolbar/slash-menu type.
+  // The selected Calendar date wins over an old caret in a hidden date panel.
+  const calendarTr = editor.state.tr;
+  const calendarTarget = ensureCalendarInsertionSelection(calendarTr,
+    rememberedCalendar && !selectionInsideCalendar(editor.state.selection)
+      ? { stripPos: rememberedCalendar.stripPos, date: rememberedCalendar.date, force: true } : {});
+  if (calendarTarget) {
+    if (calendarTr.docChanged || calendarTr.selectionSet) editor.view.dispatch(calendarTr.setMeta("addToHistory", false));
+    // A stale explicit range must not replace content in the hidden panel.
+    range = null;
+    postToSwift("calendarDiagnostic", { stage: "insert-target", blockID: calendarTarget.stripID,
+      date: calendarTarget.date, blockType: key });
+  }
   if (key === "templates") {
     if (range) editor.commands.deleteRange(range);
     const token = beginCaretInsertion(editor);
@@ -3917,7 +4154,6 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
     postToSwift("templateRequest", { token });
     return true;
   }
-  if (insertionToken && !restoreCaretInsertion(editor, insertionToken)) return false;
   if (key === "divider:washiTape") return insertWashiTape(range);
   const column = key === "plainCallout" ? activeColumnInsertion(editor.state) : null;
   const location = editor.state.selection.$from;
@@ -3990,6 +4226,38 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
     requestAnimationFrame(reportContentHeight);
     return !opensSettings || listGridModule.command(editor, "listGridRequestSettings", { blockId: json.attrs.id });
   }
+  if (key === "weekStrip") {
+    try {
+      const block = editor.schema.nodeFromJSON(weekStripJSON());
+      block.check();
+      const tr = editor.state.tr;
+      const position = insertContainerAtBlockBoundary(tr, block, range, panelChildDepth(tr.selection.$from));
+      if (position === null) {
+        postToSwift("error", { message: "Week Strip insertion was rejected at the document position." });
+        return false;
+      }
+      editor.view.dispatch(tr);
+      const exists = editor.state.doc.nodeAt(position)?.type.name === "weekStrip";
+      if (!exists) {
+        postToSwift("error", { message: "Week Strip insertion did not appear in the document." });
+        return false;
+      }
+      renderCalloutIcons();
+      requestAnimationFrame(reportContentHeight);
+      return true;
+    } catch (error) {
+      postToSwift("error", { message: `Week Strip insertion failed: ${error?.message || String(error)}` });
+      return false;
+    }
+  }
+  if (key === "existingEvent") {
+    // Preserve the insertion location before the native picker takes focus.
+    // Use the caller's explicit range when Add Block supplies one.
+    const bookmark = range || editor.state.selection;
+    pendingExistingEventConversion = { ...insertionBookmark(bookmark), kind: "insert" };
+    postToSwift("existingEventPickerRequest", { action: "insert" });
+    return true;
+  }
   if (key === "tabs") {
     // Build the complete parent + panels as a schema-validated ProseMirror node.
     // Insert at a top-level boundary; inserting inside a paragraph or nested
@@ -4001,7 +4269,7 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
       tabsNode.check();
       tabsCheckpoint("node-validated", { nodeSize: tabsNode.nodeSize });
       const tr = editor.state.tr;
-      const position = insertContainerAtBlockBoundary(tr, tabsNode, range, 1);
+      const position = insertContainerAtBlockBoundary(tr, tabsNode, range, panelChildDepth(tr.selection.$from));
       if (position === null) {
         postToSwift("error", { message: "Tabs insertion was rejected at the document position." });
         return false;
@@ -4427,7 +4695,9 @@ function insertParagraphFromEmptySurface(event) {
   const content = editor.view.dom;
   // Tabs chrome handles navigation and settings, not caret placement.
   if (target.matches(".penned-tabs[data-tabs]") ||
-      target.closest(".penned-tabs-header, .penned-tabs-bar")) return false;
+      target.closest(".penned-tabs-header, .penned-tabs-bar") ||
+      target.matches(".penned-week-strip[data-week-strip]") ||
+      target.closest(".penned-week-strip-chrome")) return false;
   if (target.closest("button, a, input, textarea, select, audio, video, iframe, [role='button']")) return false;
   const pageBoundary = pageBreakGapAtPoint(editor, target, event.clientX, event.clientY);
   if (pageBoundary !== null) {
@@ -4617,6 +4887,11 @@ if (typeof Highlight === "function" && window.CSS?.highlights && CSS.supports("s
 }
 
 document.addEventListener("pointerdown", event => documentLinks.pointerDown(editor, event), { capture: true });
+// Real user taps into another document block end Calendar insertion targeting.
+// Native toolbar taps do not reach the editor DOM and therefore retain it.
+editor.view.dom.addEventListener("pointerdown", event => {
+  if (!event.target.closest?.(".penned-week-strip")) forgetActiveCalendar(editor);
+}, { capture: true });
 document.addEventListener("mousedown", (event) => {
   if (selectionMode === "off" && event.target.closest?.(".vellix-callout-icon-button")) {
     event.preventDefault();
@@ -4748,6 +5023,55 @@ window.pennedGridCardPreview = async ({ node, settings, appearance, assets, widt
 window.pennedRepaintScallopedLabels = repaintScallopedLabels;
 
 window.tiptapCommand = async function tiptapCommand(name, args = {}) {
+  if (name === "pastePennedBlocks") {
+    if (!editor.isEditable || selectionMode !== "off" || typeof args.nativeJSON !== "string") return false;
+    let payload;
+    try { payload = JSON.parse(args.nativeJSON); } catch (_error) { return false; }
+    // A penned-slice carries an exact ProseMirror slice (with open depths) from a
+    // text-range copy; reconstruct it losslessly and drop it at the caret.
+    pennedPasteBypass = false;
+    if (payload?.format === "penned-slice" && payload.version === 1 &&
+        payload.slice && Array.isArray(payload.slice.content) && payload.slice.content.length) {
+      try {
+        const pageClones = [];
+        const freshenedContent = freshClipboardBlockIDs(payload.slice.content);
+        detachPageReferences(freshenedContent, pageClones);
+        const freshened = { ...payload.slice, content: freshenedContent };
+        const slice = Slice.fromJSON(editor.schema, freshened);
+        if (!slice.content.size) return false;
+        const tr = editor.state.tr.replaceSelection(slice);
+        if (!tr.docChanged) return false;
+        editor.view.dispatch(tr.scrollIntoView());
+        editor.view.focus();
+        postToSwift("snapshot", snapshotPayload());
+        if (pageClones.length) postToSwift("clonePageReferences", { pairs: pageClones });
+        return true;
+      } catch (_error) { return false; }
+    }
+    if (payload?.format !== "penned-blocks" || payload.version !== 1 ||
+        payload.document?.type !== "doc" || !Array.isArray(payload.document.content) ||
+        !payload.document.content.length) return false;
+    try {
+      // Validate the original nodes against the editor schema without converting
+      // them through HTML or applying document-loading normalization.
+      const copiedBlocks = freshClipboardBlockIDs(payload.document.content);
+      const pageClones = [];
+      detachPageReferences(copiedBlocks, pageClones);
+      const nodes = copiedBlocks.map(node => editor.schema.nodeFromJSON(node));
+      if (nodes.some(node => !node.isBlock || !node.type.validContent(node.content))) return false;
+      const fragment = Fragment.fromArray(nodes);
+      if (!fragment.size) return false;
+      // Insert actual ProseMirror nodes. TipTap insertContent parses JSON again
+      // and can transform custom block attributes or nested child structures.
+      const tr = editor.state.tr.replaceSelection(new Slice(fragment, 0, 0));
+      if (!tr.docChanged) return false;
+      editor.view.dispatch(tr.scrollIntoView());
+      editor.view.focus();
+      postToSwift("snapshot", snapshotPayload());
+      if (pageClones.length) postToSwift("clonePageReferences", { pairs: pageClones });
+      return true;
+    } catch (_error) { return false; }
+  }
   if (name === "requestBlockSettings") return requestBlockSettings();
   if (name === "requestSelectedBlockSettings") return requestSelectedBlockSettings(args);
   if (name === "washiTapeUpdate") return updateWashiTape(args);
@@ -4794,6 +5118,110 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
   if (listGridResult !== undefined) return listGridResult;
   const codeBlockResult = codeBlocks.command(editor, name, args);
   if (codeBlockResult !== undefined) return codeBlockResult;
+  if (name === "cancelExistingEventPicker") {
+    pendingExistingEventConversion = null;
+    return true;
+  }
+  if (name === "beginExistingEventConversion") {
+    if (!editor.isEditable) return false;
+    if (!args.blockSelection) {
+      const calendarTr = editor.state.tr;
+      const target = ensureCalendarInsertionSelection(calendarTr);
+      if (target && (calendarTr.docChanged || calendarTr.selectionSet)) {
+        editor.view.dispatch(calendarTr.setMeta("addToHistory", false));
+        postToSwift("calendarDiagnostic", { stage: "convert-event-target", date: target.date, blockID: target.stripID });
+      }
+    }
+    const blocks = args.blockSelection
+      ? (window.PennedBlockSelection?.selectedRecords?.() ?? [])
+      : [];
+    if (args.blockSelection && !blocks.length) return false;
+    pendingExistingEventConversion = args.blockSelection
+      ? { ids: blocks.map(({ node }) => node.attrs.id).filter(Boolean) }
+      : { ...insertionBookmark(editor.state.selection), kind: "convert" };
+    postToSwift("existingEventPickerRequest", { action: "convert" });
+    return true;
+  }
+  if (name === "refreshLinkedCalendarEvent") {
+    if (!args.eventID) return false;
+    const tr = editor.state.tr;
+    let changed = false;
+    tr.doc.descendants((node, pos) => {
+      if (node.type.name !== "linkedCalendarEvent" || node.attrs.eventID !== args.eventID) return;
+      const updated = updateLinkedCalendarEventJSON(node.toJSON(), args);
+      if (!updated || (updated.attrs.title === node.attrs.title && updated.attrs.calendarTitle === node.attrs.calendarTitle && updated.attrs.start === node.attrs.start && updated.attrs.end === node.attrs.end && updated.attrs.isAllDay === node.attrs.isAllDay && updated.attrs.timeZoneID === node.attrs.timeZoneID && updated.attrs.available === node.attrs.available)) return;
+      tr.setNodeMarkup(pos, undefined, updated.attrs);
+      changed = true;
+    });
+    if (changed) editor.view.dispatch(tr.setMeta("addToHistory", false));
+    return true;
+  }
+  if (name === "insertLinkedCalendarEvent") {
+    if (!editor.isEditable || !args.eventID || !args.eventIdentity) return false;
+    let node;
+    try { node = editor.schema.nodeFromJSON(linkedCalendarEventJSON({
+      id: id(), eventID: args.eventID, identity: args.eventIdentity,
+      title: args.title, calendarTitle: args.calendarTitle, start: args.start, end: args.end,
+      isAllDay: args.isAllDay, timeZoneID: args.timeZoneID, available: true,
+    })); } catch { return false; }
+    const tr = editor.state.tr;
+    const conversion = pendingExistingEventConversion;
+    pendingExistingEventConversion = null;
+    if (conversion?.ids?.length) {
+      const records = [];
+      tr.doc.descendants((candidate, pos) => {
+        if (conversion.ids.includes(candidate.attrs.id)) records.push({ candidate, pos });
+      });
+      if (records.length !== conversion.ids.length) return false;
+      for (const record of records.reverse()) tr.replaceWith(record.pos, record.pos + record.candidate.nodeSize, [node.type.create({ ...node.attrs, id: id() }), record.candidate]);
+      editor.view.dispatch(tr);
+      return true;
+    }
+    const bookmark = insertionRange(conversion);
+    if (bookmark) {
+      if (bookmark.from < 0 || bookmark.to > tr.doc.content.size) return false;
+      tr.setSelection(Selection.near(tr.doc.resolve(bookmark.from)));
+    }
+    const range = conversion?.kind === "convert" && bookmark?.to > bookmark?.from ? bookmark : null;
+    const position = insertContainerAtBlockBoundary(tr, node, range, panelChildDepth(tr.selection.$from));
+    if (position === null) return false;
+    editor.view.dispatch(tr);
+    return editor.state.doc.nodeAt(position)?.type.name === "linkedCalendarEvent";
+  }
+  if (name === "weekStripSetAttr") {
+    if (!editor.isEditable) return false;
+    let found = null;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "weekStrip" && node.attrs.id === args.blockId) { found = { node, pos }; return false; }
+    });
+    if (!found) return false;
+    const panelSummary = node => node.content.content.map(panel => ({
+      date: panel.attrs.date, id: panel.attrs.id, count: panel.childCount,
+      types: panel.content.content.map(child => child.type.name),
+    }));
+    postToSwift("calendarDiagnostic", { stage: "setting-before", blockID: args.blockId,
+      setting: args.key, selectedDate: found.node.attrs.selectedDate, panels: panelSummary(found.node) });
+    const changed = updateWeekStripAppearanceJSON(found.node.toJSON(), args.key, args.value);
+    if (!changed) return false;
+    if (changed.attrs[args.key] === found.node.attrs[args.key]) return true;
+    const value = changed.attrs[args.key];
+    const tr = editor.state.tr;
+    if (args.key === "firstDayOfWeek") {
+      const selected = found.node.attrs.selectedDate;
+      const updated = navigateWeekStripJSON({ ...found.node.toJSON(), attrs: { ...found.node.attrs, firstDayOfWeek: value } }, selected);
+      const missing = updated.content.slice(found.node.childCount);
+      if (missing.length) tr.insert(found.pos + found.node.nodeSize - 1, missing.map(panel => editor.schema.nodeFromJSON(panel)));
+    }
+    tr.setNodeMarkup(found.pos, undefined, { ...found.node.attrs, [args.key]: value });
+    editor.view.dispatch(tr);
+    const after = editor.state.doc.nodeAt(found.pos);
+    postToSwift("calendarDiagnostic", { stage: "setting-after", blockID: args.blockId,
+      setting: args.key, selectedDate: after?.attrs.selectedDate,
+      panels: after?.type.name === "weekStrip" ? panelSummary(after) : [],
+      sameContent: after?.type.name === "weekStrip" && after.childCount === found.node.childCount &&
+        found.node.content.content.every((panel, index) => panel.eq(after.child(index))) });
+    return true;
+  }
   const tabsResult = tabsModule.command(editor, name, args);
   if (tabsResult !== undefined) return tabsResult;
   const informationCardResult = informationCardModule.command(editor, name, args);
@@ -4894,6 +5322,21 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
       editor.view.dispatch(tr);
       postToSwift("snapshot", snapshotPayload());
       if (args.documentId) postToSwift("pageOpenRequest", { documentId: args.documentId });
+      return true;
+    }
+    case "applyClonedPageReference": {
+      // Repoint a duplicated/pasted page card at its freshly cloned independent
+      // page (or delete the card if the clone failed). Never auto-opens the page.
+      let target = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "pageReference" && node.attrs.id === args.blockId) target = { node, pos };
+      });
+      if (!target) return false;
+      const tr = editor.state.tr;
+      if (!args.documentId) tr.delete(target.pos, target.pos + target.node.nodeSize);
+      else tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, documentID: args.documentId });
+      editor.view.dispatch(tr);
+      postToSwift("snapshot", snapshotPayload());
       return true;
     }
     case "setContent":

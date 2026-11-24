@@ -15,10 +15,11 @@ export function attachmentActions({ root, enabled, request }) {
     if (!enabled() || !root.contains(host)) return;
     cancelHold(); suppressed = { host, until: Infinity }; request(host);
   };
-  const start = (target, x, y, source, pointerID) => {
+  const start = (target, x, y, source, pointerID, pointerType = "touch") => {
     cancelHold(); suppressed = null;
     const host = hostAt(target);
     if (!host || target.closest("input, textarea, select")) return;
+    if (window.PennedBlockDragAndDrop?.allowBlockHold({ target, clientX: x, clientY: y, pointerType }, "attachment-actions") === false) return;
     gesture = { host, x, y, source, pointerID, timer: window.setTimeout(() => present(host), 500) };
   };
   const move = (x, y) => {
@@ -37,7 +38,7 @@ export function attachmentActions({ root, enabled, request }) {
   listen(document, "pointerdown", event => {
     pointers.add(event.pointerId); cancelHold();
     if (pointers.size !== 1 || event.isPrimary === false || event.button !== 0) return;
-    start(event.target, event.clientX, event.clientY, "pointer", event.pointerId);
+    start(event.target, event.clientX, event.clientY, "pointer", event.pointerId, event.pointerType);
   });
   listen(document, "pointermove", event => {
     if (gesture?.source === "pointer" && gesture.pointerID === event.pointerId) move(event.clientX, event.clientY);
@@ -61,6 +62,7 @@ export function attachmentActions({ root, enabled, request }) {
   listen(document, "contextmenu", event => {
     const host = hostAt(event.target);
     if (!host) return;
+    if (window.PennedBlockDragAndDrop?.allowBlockHold(event, "attachment-contextmenu") === false) { suppress(event); return; }
     suppress(event);
     if (!suppressed || suppressed.host !== host || Date.now() > suppressed.until) present(host);
   }, false);
