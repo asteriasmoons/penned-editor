@@ -17,7 +17,7 @@ export function containsAttachments(nodes) {
   return nodes.some(
     (node) =>
       node.type === "attachment" ||
-      (["divider", "iconCallout"].includes(node.type) &&
+      (["divider", "iconCallout", "countdown"].includes(node.type) &&
         node.attrs?.imagePath) ||
       node.attrs?.clipSource?.file?.relativePath ||
       containsAttachments(node.content || []),
@@ -486,17 +486,18 @@ export function createAttachments({
       );
       if ([...files.keys()].some((path) => !previous.has(path))) {
         for (const callout of editor.view.dom.querySelectorAll(
-          ".penned-icon-callout[data-callout-image]",
+          ".penned-icon-callout[data-callout-image], .penned-document-widget[data-callout-image]",
         )) {
           const path = callout.dataset.calloutImage;
           const image = callout.querySelector(".penned-icon-callout-image");
           if (
             !previous.has(path) &&
             files.has(path) &&
-            image?.complete &&
-            !image.naturalWidth
+            image && !image.naturalWidth
           ) {
-            const src = attachmentURL({ relativePath: path }) + "&retry=1";
+            const retry = new URL(image.getAttribute("src") || attachmentURL({ relativePath: path }));
+            retry.searchParams.set("retry", "1");
+            const src = retry.href;
             image.src = src;
             image
               .closest(".penned-icon-callout-tint")

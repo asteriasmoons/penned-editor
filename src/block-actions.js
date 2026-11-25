@@ -45,7 +45,7 @@ export function createBlockActions({ editor, blocks, elementForBlock, selectionA
   };
   const reset = () => { gridMouseMenu = null; cancelHold(); request = null; restoreText(); };
   const eligibleSurface = target => enabled() && target instanceof window.Element && root.contains(target) &&
-    !target.closest("table, .tableWrapper, .penned-collection, .vellix-page-reference, .penned-attachment, .penned-label-tile, .penned-tabs-bar, .penned-information-card-disclosure, .vellix-task-metadata, input, textarea, select, a") &&
+    !target.closest("table, .tableWrapper, .penned-collection, .vellix-page-reference, .penned-attachment, .penned-label-tile, .penned-tabs-bar, .penned-information-card-disclosure, .penned-widget-settings-surface, .vellix-task-metadata, input, textarea, select, a") &&
     !target.closest(".penned-information-card-title, .penned-information-card-description, .penned-information-card-body :is(p, h1, h2, h3, h4, h5, h6, pre)");
   const blockAt = target => {
     if (!eligibleSurface(target)) return null;

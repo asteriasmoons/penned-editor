@@ -52,7 +52,7 @@ import { createMinimalFields } from "./minimal-fields.js";
 import { createInformationCard, informationCardJSON } from "./information-card.js";
 import { GRID_CARD_DEFAULTS, gridCardSettings, gridCardDOMAttributes, newGridCard } from "./grid-card.js";
 import { gridCardSettingDifferences, gridCardSettingTypes } from "./grid-card-diagnostics.js";
-import { ICON_CALLOUT_DEFAULTS, iconCalloutNode, iconCalloutSettings, plainCalloutSettings, plainCalloutSurface } from "./icon-callout.js";
+import { ICON_CALLOUT_DEFAULTS, iconCalloutNode, iconCalloutSettings, iconCalloutGlyph, iconCalloutImage, plainCalloutSettings, plainCalloutSurface } from "./icon-callout.js";
 import { createLabelHeading, labelLevel, labelSettings, updateHeadingLabel } from "./heading-label.js";
 import { createDocumentLinks, richLinkLayout, richLinkMetadata, webLinkURL } from "./document-links.js";
 import { nativeCollectionRegions } from "./native-collection-regions.js";
@@ -131,6 +131,9 @@ const SLASH_ITEMS = [
   { key: "table", title: "Table", detail: "Rows, columns and formulas", icon: "blackcal" },
   { key: "listGrid", title: "List Grid", detail: "Labeled rows in a grid", icon: "blackcal" },
   { key: "tabs", title: "Tabs", detail: "Tabbed sections of content", icon: "window" },
+  { key: "moodBar", title: "Mood Bar", detail: "Interactive seven-mood slider", icon: "happy" },
+  { key: "countdown", title: "Countdown", detail: "Count down to a date and time", icon: "clockwavy" },
+  { key: "calculator", title: "Calculator", detail: "Interactive calculator", icon: "blackcal" },
   { key: "fields", title: "Fields", detail: "Minimal label and value records", icon: "linedpages" },
   { key: "informationCard", title: "Information Card", detail: "Title, description and details", icon: "linedpages" },
   { key: "heading1", title: "Title", detail: "H1, 24px", icon: "h1" },
@@ -879,6 +882,9 @@ const BlockID = Extension.create({
           "plainCallout",
           "plainCalloutRow",
           "templateComponent",
+          "moodBar",
+          "countdown",
+          "calculator",
           "attachment",
           "divider",
           "pageBreak",
@@ -935,7 +941,7 @@ const BlockID = Extension.create({
     const autoIdTypes = new Set([
       "paragraph", "caption", "heading", "codeBlock", "blockquote",
       "bulletList", "orderedList", "listItem", "taskList",
-      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid", "tabs", "weekStrip", "minimalFields", "informationCard", "gridCard", "iconCallout", "richLink",
+      "divider", "pageBreak", "toggleItem", "inlineProperty", "pageReference", "listGrid", "tabs", "weekStrip", "moodBar", "countdown", "calculator", "minimalFields", "informationCard", "gridCard", "iconCallout", "richLink",
       // Structural nodes inside List Grids and Information Cards. createNodeIndex
       // descends into matched nodes, so these are assigned and de-duplicated even
       // though they are nested inside their container.
@@ -1120,13 +1126,16 @@ const GridCard = Node.create({
   },
 });
 
+const renderCalloutLibraryIcon = (icon, color, rasterized = false) => rasterized
+  ? iconCalloutImage(iconSource(icon, color, 24), null)
+  : ["span", {
+    class: "vellix-callout-icon-image", role: "img", "aria-label": icon,
+    style: `background-image:${cssBackgroundImageSource(iconSource(icon, color, 22))};`,
+  }];
 const IconCallout = iconCalloutNode({
   selectionActive: () => selectionMode !== "off",
   reportHeight: () => requestAnimationFrame(reportContentHeight),
-  renderLibraryIcon: (icon, color) => ["span", {
-    class: "vellix-callout-icon-image", role: "img", "aria-label": icon,
-    style: `background-image:${cssBackgroundImageSource(iconSource(icon, color, 22))};`,
-  }],
+  renderLibraryIcon: renderCalloutLibraryIcon,
 });
 
 const PlainCallout = Node.create({
@@ -1661,6 +1670,10 @@ const editor = new Editor({
       TextSelection, NodeSelection, DOMSerializer, ReplaceStep, isHistoryTransaction }),
     VellixDocument,
     Caption,
+    window.PennedMoodBar.createExtension({ Node, mergeAttributes, post: postToSwift }),
+    window.PennedCountdown.createExtension({ Node, mergeAttributes, post: postToSwift,
+      renderIcon: settings => iconCalloutGlyph(settings, renderCalloutLibraryIcon, true) }),
+    window.PennedCalculator.createExtension({ Node, mergeAttributes, post: postToSwift, closeHistory, fonts: blockFontFamilies }),
     templateComponents.node,
     attachments.node,
     attachments.integration,
@@ -3305,6 +3318,7 @@ function settingsKind(node, fromSelectionBar = false) {
   if (!node.attrs.id) return null;
   const type = node.type.name;
   if (["listGrid", "minimalFields", "informationCard", "tabs"].includes(type)) return type;
+  if (fromSelectionBar && ["moodBar", "countdown", "calculator"].includes(type)) return type;
   if (type === "heading" && labelLevel(node.attrs.level) && node.attrs.label?.presentation === "label") return "headingLabel";
   if (type === "plainCallout" && !clipSource(node.attrs.clipSource)) return type;
   if (!fromSelectionBar) return null;
@@ -3374,6 +3388,17 @@ function requestBlockSettings(target = blockSettingsTarget()) {
   const { kind, node } = target;
   const blockId = node.attrs.id;
   switch (kind) {
+    case "calculator":
+      editor.view.dom.blur();
+      postToSwift("calculatorSettings", { blockId, settings: window.PennedCalculator.settings(node.attrs), state: window.PennedCalculator.state(node.attrs.state) });
+      return true;
+    case "moodBar":
+    case "countdown":
+      editor.view.dom.blur();
+      postToSwift(kind === "moodBar" ? "moodBarSettings" : "countdownSettings", {
+        blockId, settings: kind === "moodBar" ? window.PennedMoodBar.settings(node.attrs) : window.PennedCountdown.settings(node.attrs),
+      });
+      return true;
     case "listGrid":
       return listGridModule.command(editor, "listGridRequestSettings", { blockId });
     case "minimalFields":
@@ -3988,6 +4013,12 @@ function blockNodeForKey(key) {
     return { type: "inlineProperty", attrs: { id: id(), property: normalizeProperty({ kind: key.slice(9) }) } };
   }
   switch (key) {
+    case "calculator":
+      return { type: "calculator", attrs: { id: id(), state: window.PennedCalculator.initialState() } };
+    case "countdown":
+      return { type: "countdown", attrs: window.PennedCountdown.newAttrs() };
+    case "moodBar":
+      return { type: "moodBar", attrs: { id: id() } };
     case "caption":
       return { type: "caption", attrs: { id: id() } };
     case "heading1":
@@ -4367,6 +4398,13 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
   }
   if (key === "pageBreak") {
     return insertPageBreak(range);
+  }
+  if (key === "moodBar" || key === "countdown" || key === "calculator") {
+    const insertion = editor.chain();
+    if (range) insertion.deleteRange(range);
+    const inserted = insertion.insertContent(blockNodeForKey(key)).run();
+    if (inserted) { editor.view.dom.blur(); requestAnimationFrame(reportContentHeight); }
+    return inserted;
   }
 
   const node = normalizeTipTapNode(blockNodeForKey(key));
@@ -5371,6 +5409,12 @@ window.tiptapCommand = async function tiptapCommand(name, args = {}) {
         });
       }
 	      return true;
+    case "moodBarSetAttr":
+      return editor.isEditable && selectionMode === "off" && editor.commands.moodBarSetAttr(args);
+    case "countdownUpdate":
+      return editor.isEditable && selectionMode === "off" && editor.commands.countdownUpdate(args) ? snapshotPayload() : false;
+    case "calculatorUpdate":
+      return editor.isEditable && selectionMode === "off" && editor.commands.calculatorUpdate(args) ? snapshotPayload() : false;
     case "setEditable":
       editor.setEditable(args.editable === true, false);
       if (!editor.isEditable) hideSlashMenu();

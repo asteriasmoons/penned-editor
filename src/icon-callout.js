@@ -49,6 +49,14 @@ export function iconCalloutImage(src, tint) {
   }, image];
 }
 
+export function iconCalloutGlyph(settings, renderLibraryIcon, rasterized = false) {
+  if (!settings.imagePath) return renderLibraryIcon(settings.icon, settings.iconColor, rasterized);
+  let src = attachmentURL({ relativePath: settings.imagePath });
+  // Standalone widgets cannot depend on the callout-only mask hydration pass.
+  if (rasterized && settings.imageTint) src += `&preview=icon&tint=${encodeURIComponent(settings.imageTint)}`;
+  return iconCalloutImage(src, rasterized ? null : settings.imageTint);
+}
+
 export function iconCalloutNode({ renderLibraryIcon, selectionActive = () => false, reportHeight }) {
   return Node.create({
     name: "iconCallout", group: "block", content: "block+", defining: true, isolating: true,
@@ -73,7 +81,7 @@ export function iconCalloutNode({ renderLibraryIcon, selectionActive = () => fal
       const children = [["button", {
         type: "button", class: "vellix-callout-icon-button", contenteditable: "false",
         "data-vellix-callout-icon-button": "true", "aria-label": "Callout Settings",
-      }, imagePath ? iconCalloutImage(attachmentURL({ relativePath: imagePath }), imageTint) : renderLibraryIcon(icon, iconColor)]];
+      }, iconCalloutGlyph({ imagePath, imageTint, icon, iconColor }, renderLibraryIcon)]];
       if (hasTitle) children.push(["div", { class: "penned-icon-callout-title", contenteditable: "false" }, settings.title]);
       children.push(["div", { class: "vellix-callout-text", "aria-hidden": settings.collapsed ? "true" : null,
         ...(settings.collapsed ? { inert: "" } : {}) }, 0]);

@@ -25,6 +25,9 @@ async function prepareDist() {
   await rm(dist, { recursive: true, force: true });
   await mkdir(dist, { recursive: true });
   let html = await readFile(resolve(root, "src", "tiptap.html"), "utf8");
+  const widgetLayout = JSON.parse(await readFile(resolve(root, "src", "document-widget-layout.json"), "utf8"));
+  html = html.replace("__PENNED_WIDGET_LAYOUT__", JSON.stringify(widgetLayout));
+  await copyFile(resolve(root, "src", "document-widget-layout.json"), resolve(dist, "document-widget-layout.json"));
   const grainName = "label-grain-light.png";
   const grain = await readFile(resolve(root, "src", grainName));
   // The inline WKWebView document and exports must not depend on a file request.
@@ -34,7 +37,7 @@ async function prepareDist() {
   await cp(resolve(root, "src", "fonts"), resolve(dist, "fonts"), { recursive: true });
   await cp(resolve(root, "src", "vendor"), resolve(dist, "vendor"), { recursive: true });
   await copyFile(resolve(root, "node_modules", "prismjs", "LICENSE"), resolve(dist, "Prism-LICENSE.txt"));
-  for (const name of ["table-formulas.js", "vellix-tables.js", "vellix-tables.css", "text-gradient-paint.js", "code-block-catalog.json"]) {
+  for (const name of ["document-widgets.js", "mood-bar.js", "countdown-widget.js", "calculator-widget.js", "table-formulas.js", "vellix-tables.js", "vellix-tables.css", "text-gradient-paint.js", "code-block-catalog.json"]) {
     await copyFile(resolve(root, "src", name), resolve(dist, name));
   }
 }
