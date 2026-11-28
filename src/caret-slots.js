@@ -311,17 +311,23 @@ function blockBounds(view, node, position) {
   } : rect;
 }
 
-export function blockGapAtPoint(editor, target, clientX, clientY) {
+export function blockGapAtPoint(editor, target, clientX, clientY, { within = null } = {}) {
   const { view, state } = editor;
   if (!view.dom.contains(target) || target.closest(
     "button, a, input, textarea, select, audio, video, iframe, [role='button'], table, .vellix-table-wrapper",
   )) return null;
+  if (within !== null && (!Number.isInteger(within) || within < 0 || within >= state.doc.content.size)) return null;
+  const scope = within === null ? null : state.doc.nodeAt(within);
+  if (within !== null && (!scope || scope.isTextblock)) return null;
   const hit = view.posAtCoords({ left: clientX, top: clientY });
-  if (!hit) return null;
+  if (!hit && !scope) return null;
   const candidates = new Set();
-  const seeds = [hit.pos];
-  if (hit.inside >= 0) seeds.push(hit.inside);
-  seeds.push(view.posAtDOM(target, 0));
+  const seeds = hit ? [hit.pos] : [];
+  if (hit?.inside >= 0) seeds.push(hit.inside);
+  if (!scope) seeds.push(view.posAtDOM(target, 0));
+  else {
+    try { seeds.push(view.posAtDOM(target, 0)); } catch { /* Container boundaries below remain available. */ }
+  }
   for (const seed of seeds) {
     const resolved = state.doc.resolve(seed);
     for (let depth = resolved.depth; depth >= 0; depth--) {
@@ -337,7 +343,14 @@ export function blockGapAtPoint(editor, target, clientX, clientY) {
       }
     }
   }
+  if (scope) {
+    // Blank minimum-height space can hit a neighboring block instead of this
+    // container's text. Keep every direct child boundary available as a fallback.
+    candidates.add(within + 1);
+    scope.forEach((node, offset) => candidates.add(within + 1 + offset + node.nodeSize));
+  }
   for (const position of candidates) {
+    if (scope && (position < within + 1 || position > within + scope.nodeSize - 1)) continue;
     const boundary = state.doc.resolve(position);
     const parent = boundary.parent;
     // Horizontal row insertion belongs exclusively to the explicit empty-column
@@ -364,4 +377,36 @@ export function blockGapAtPoint(editor, target, clientX, clientY) {
     if (clientY >= top && clientY < bottom) return position;
   }
   return null;
+}
+
+export function placeGridCardCaretInGap(editor, target, clientX, clientY, { gridID = null, scroll = true } = {}) {
+  const { view, state } = editor;
+  if (!editor.isEditable || view.composing || !(target instanceof HTMLElement) || !view.dom.contains(target) ||
+      target.closest("button, a, input, textarea, select, audio, video, iframe, [role='button'], [role='checkbox'], [contenteditable='false'], [inert], [hidden], .penned-grid-card-header")) return null;
+  const surface = target.closest(".penned-grid-card, [data-type='penned-grid-card']");
+  const body = surface?.querySelector(":scope > .vellix-callout-text");
+  if (!(body instanceof HTMLElement)) return null;
+  const bodyRect = body.getBoundingClientRect(), cardRect = surface.getBoundingClientRect();
+  const header = surface.querySelector(":scope > .penned-grid-card-header");
+  const bodyTop = header ? header.getBoundingClientRect().bottom : bodyRect.top;
+  if (bodyRect.width <= 0 || cardRect.height <= 0 || getComputedStyle(surface).visibility === "hidden" ||
+      clientX < cardRect.left || clientX > cardRect.right || clientY < bodyTop || clientY >= cardRect.bottom) return null;
+
+  const mapped = view.posAtDOM(surface, 0), at = state.doc.resolve(mapped);
+  const positions = [mapped, mapped - 1];
+  for (let depth = at.depth; depth > 0; depth--) positions.push(at.before(depth));
+  const position = positions.find(pos => pos >= 0 && pos < state.doc.content.size &&
+    state.doc.nodeAt(pos)?.type.name === "gridCard" && view.nodeDOM(pos) === surface);
+  if (position === undefined) return null;
+  const grid = state.doc.nodeAt(position);
+  if (gridID && grid.attrs.id !== gridID) return null;
+  const gap = blockGapAtPoint(editor, target, clientX, clientY, { within: position });
+  if (gap === null) return null;
+  const boundary = state.doc.resolve(gap);
+  for (let depth = boundary.depth; depth > 0; depth--) {
+    if (editor.storage?.vellixStructuredPlaceholders?.isProtected?.(boundary.node(depth))) return null;
+  }
+  if (!placeCaretInSlot(editor, gap, { scroll })) return null;
+  return { position: editor.state.selection.from, paragraphID: editor.state.selection.$from.parent.attrs.id,
+    gridID: grid.attrs.id, inserted: editor.state.doc !== state.doc };
 }

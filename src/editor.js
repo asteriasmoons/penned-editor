@@ -35,7 +35,8 @@ import { createCaretTracking } from "./caret-tracking.js";
 import { createCalloutListBackspace } from "./callout-list-backspace.js";
 import { CaretSlots, activeColumnInsertion, beginCaretInsertion, blockGapAtPoint, clearUnusedCaretSlots,
   documentWithoutUnusedCaretSlots, endCaretInsertion, hasCaretInsertion, placeCaretInSlot, resetCaretInsertions, restoreCaretInsertion,
-  trailingNumberedLine, separateTrailingNumberedLine, placeCaretOnTrailingNumberedLine, pageBreakGapAtPoint } from "./caret-slots.js";
+  trailingNumberedLine, separateTrailingNumberedLine, placeCaretOnTrailingNumberedLine, pageBreakGapAtPoint,
+  placeGridCardCaretInGap } from "./caret-slots.js";
 import { calloutRow, CalloutRowCleanup, calloutWidthAttribute, LegacyToggleFollowers } from "./resizable-callouts.js";
 import { calloutRowMetrics } from "./callout-layout.js";
 import { unwrapRetiredColumns } from "./retired-column-content.js";
@@ -4385,7 +4386,7 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
       return false;
     }
   }
-  if (key === "nestedPage" || key === "pageCard") {
+  if (key === "nestedPage" || key === "pageCard" || key === "pageBook") {
     if (!editor.isEditable || selectionMode !== "off") return false;
     const blockId = id();
     const node = { type: "pageReference", attrs: { id: blockId, documentID: "" } };
@@ -4393,7 +4394,7 @@ function insertBlockByKey(key, range = null, color = null, insertionToken = null
     const inserted = range ? insertion.deleteRange(range).insertContent(node).run() : insertion.insertContent(node).run();
     if (!inserted) return false;
     editor.commands.blur();
-    postToSwift(key === "pageCard" ? "pageCardRequest" : "nestedPageRequest", { blockId });
+    postToSwift(key === "pageCard" ? "pageCardRequest" : key === "pageBook" ? "pageBookRequest" : "nestedPageRequest", { blockId });
     return true;
   }
   if (key === "pageBreak") {
@@ -4699,6 +4700,14 @@ function placeCaretAtPageBoundary(position) {
   // A second reveal from ProseMirror can scroll against the changing page layout.
   return placeCaretInSlot(editor, position, { scroll: !window.PennedBlockSelection });
 }
+
+editor.storage.pennedGridCardCaret = {
+  placeGap({ target, clientX, clientY, gridID }) {
+    if (selectionMode !== "off" || window.PennedBlockSelection?.hasActiveGesture ||
+        window.PennedBlockDragAndDrop?.ownsReorder || window.PennedBlockDragAndDrop?.busy) return null;
+    return placeGridCardCaretInGap(editor, target, clientX, clientY, { gridID });
+  },
+};
 
 function focusEditorAtDocumentEnd() {
   if (selectionMode !== "off" || !editor.isEditable) return false;
